@@ -25,21 +25,21 @@ class Operator:
 	
 class Input(Operator):
 	def __init__(self,_Input):
-		Super(Input,self).__init__(InputList=_Input,InputDegree=0,OutputDegree=1,Name='Input')
+		Super(Input,self).__init__(InputList=[_Input],InputDegree=0,OutputDegree=1,Name='Input')
 		
 	def ConstructFunc(self,InputList):
 		self.Tensor=InputList[0]
 
 class NoConnection(Operator):
 	def __init__(self,_Input=None):
-		Super(Input,self).__init__(InputList=_Input,InputDegree=0,OutputDegree=0,Name='NULL')
+		Super(NoConnection,self).__init__(InputList=[_Input],InputDegree=0,OutputDegree=0,Name='NULL')
 		
 	def ConstructFunc(self,InputList):
 		assert False,'Should not appear.'
 
 class Output(Operator):
 	def __init__(self,_Input):
-		Super(Input,self).__init__(InputList=_Input,InputDegree=1,OutputDegree=0,Name='Output')
+		Super(Output,self).__init__(InputList=_Input,InputDegree=1,OutputDegree=0,Name='Output')
 		
 	def ConstructFunc(self,InputList):
 		self.Tensor=InputList[0]
