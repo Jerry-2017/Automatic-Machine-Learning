@@ -43,13 +43,13 @@ def PoolingFactory(Size,Stride,Type):
 			InputOp=InputList[0]
 			InputTensor=InputOp.GetTensor()
 			if Pooling.Type=='Max':
-				self.Tensor=tf.tf.nn.max_pool(	InputTensor,
+				self.Tensor=tf.nn.max_pool(	InputTensor,
 												Size=Pooling._Size,
 												strides=Pooling._Stride,
 												padding='SAME',
 												data_format=Data_Format)
 			elif Pooling.Type='Avg':
-				self.Tensor=tf.tf.nn.avg_pool(	InputTensor,
+				self.Tensor=tf.nn.avg_pool(	InputTensor,
 												Size=Pooling._Size,
 												strides=Pooling._Stride,
 												padding='SAME',
@@ -115,5 +115,5 @@ def BinaryOpFactory(Type):
 				self.Tensor=tf.concat([InputOp1Tensor,InputOp2Tensor],1
 			elif BinaryOp._Type=='Add':
 				self.Tensor=tf.add(InputOp1Tensor,InputOp2Tensor)
-
+	return BinaryOp
 				
