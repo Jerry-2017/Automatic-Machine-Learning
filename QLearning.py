@@ -60,6 +60,8 @@ class QLearning():
 		OutputNum=TaskSpecific["OutputNum"]
 
 		TaskInput=TaskSpecific["TaskInput"]
+		self.HisNet=[]
+		self.HisNetPerf=[]
 		for i in range(Times):
 			Gph=Graph(	VertexNum=VertexNum,
 						OperatorList=OperatorList,
@@ -83,6 +85,8 @@ class QLearning():
 			
 			Gph.ApplyOption(ChosenOption)
 			BuiltNet=Gph.BuildGraph()
+			FinalNet=NetworkGenerator(BuiltNet)
+			
 			Step=100
 			Performance=self.TrainNet(BuiltNet,TaskInput,Step)
 			
@@ -93,7 +97,9 @@ class QLearning():
 			self.HisNetPerf.append(HisItem["Performance"])
 			QStep=100
 			self.TrainQNet(self.Output,self.HisNet,self.HisNetPerf,QStep)
-				
+	
+	def Log(self,Log):
+		print(Log)
 				
 			
 		

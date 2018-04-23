@@ -23,6 +23,12 @@ class Operator:
 	def GetTensor(self):
 		return self.Tensor
 	
+	def GetParameters(self):
+		return None
+	
+	def SetParameters(self):
+		assert False,'Not Implemented'
+	
 class Input(Operator):
 	def __init__(self,_Input):
 		Super(Input,self).__init__(InputList=[_Input],InputDegree=0,OutputDegree=1,Name='Input')
@@ -45,7 +51,9 @@ class Output(Operator):
 		self.Tensor=InputList[0]
 		
 class Graph:
-	def __init__(self,VertexNum,OperatorList,InputNum=1,OutputNum=1):
+	def __init__(self,VertexNum,OperatorList,InputNum=1,OutputNum=1,ConcatOperator=None):
+		assert ConcatOperator is not None
+		
 		self.VertexNum=VertexNum
 		self.OperatorList=[NoConnection]+OperatorList
 		self.InputNum=InputNum
@@ -53,6 +61,7 @@ class Graph:
 		self.VertexList=[None]*self.VertexNum
 		self.VertexOpType=[None]*self.VertexNum
 		self.IncidenceMatrix=[[None for i in range(self.VertexNum)] for j in range(self.VertexNum)]
+		self.ConcatOperator=ConcatOperator
 		
 		self.OperatorApplied=[]
 		self.VertexDepth=[0 for i in range(self.VertexNum)]
@@ -66,6 +75,8 @@ class Graph:
 		
 		for i in range(self.InputNum):
 			self.VertexDegreeQuota[i]=1
+		
+	
 	def ConnectOptions(self):
 	
 		OuputDegreeSum=0
@@ -161,5 +172,17 @@ class Graph:
 			TensorInput=[]
 			for Index in Option[3:]:
 				TensorInput.append(InternalTensor[Index])
-			InternalTensor[InternalIndex]=self.OperatorList[Option[0]].ConstructFunc(*TensorInput)
+			InternalTensor[InternalIndex]=self.OperatorList[Option[0]]().ConstructFunc(*TensorInput)
+			
+		ToBeConnected=[]
+		for i in range(self.VertexOccupied):
+			if self.VertexDegreeQuota[i]>0:
+				ToBeConnected+=[self.OperatorList[i] for _ in range(self.VertexDegreeQuota[i])]:
+				
+		Output=self.ConcatOperator().ConstructFunc(ToBeConnected)
+		return Output
 		
+	def GetParameterCopy(self):
+		ParameterList=[]
+		for i in range(
+				

@@ -3,8 +3,57 @@ from Graph import Operator
 
 Data_Format='NHWC'
 
+def ConcatImageTensor(TensorList):
+	LenList=len(TensorList)
+	BatchSize=TensorList[0].shape[0]
+	PadTensor=[]
+	MaxHeight=0
+	MaxWidth=0
+	for i in range(LenList):
+		TensorShape=TensorList[i].shape()
+		assert TensorShape[0]==BatchSize,'Batchsize inequal'
+		if TensorShape[1]>MaxHeight:
+			MaxHeight=TensorShape[1]
+		if TensorShape[2]>MaxWidth:
+			MaxWidth=TensorShape[2]
+	for i in range(LenList):
+		TensorShape=TensorList[i].shape()
+		Paddings=[[0,0],[0,TensorShape[1]-MaxHeight],[0,TensorShape[2]-MaxWidth],[0,0]]
+		PadTensor.append(tf.pad(TensorList[i]),Paddings,'SYMMETRIC')
+	ConcatTensor=tf.concat(PadTensor,axis=3)
+	return ConcatTensor
+
+def ConcatOperator(OperatorList):
+	TensorList=[]
+	for Input in OperatorList:
+		Tensor=Input.GetTensor()
+		H,W,C=Input.GetImageAttr()
+		if Tensor.shape()==(BatchSize,H,W,C):
+			ReshapeTensor=Tensor
+		else:
+			ReshapeTensor=Tensor.reshape([BatchSize,H,W,C])
+		TensorList.append(ReshapeTensor)
+	return Tensor=ConcatImageTensor(TensorList)
+
+
+class ImageOperator(Operator):
+	def SetImageAttr(self,Width,Height,Channel):
+		self.Width=Width
+		self.Height=Height
+		self.Channel=Channel
+	def GetImageAttr(self):
+		return self.Width,self.Height,self.Channel
+
+class ImageInput(ImageOperator):
+	def __init__(self,_Input):
+		Super(ImageInput,self).__init__(InputList=[_Input],InputDegree=0,OutputDegree=1,Name='Input')
+		
+	def ConstructFunc(self,InputList):
+		self.Tensor=InputList[0]		
+		
+
 def Conv2DFactory(Size,ChannelCoef,Stride):
-	class Conv2D(Operator):
+	class Conv2D(ImageOperator):
 		_Height=Size
 		_Width=Size
 		_Stride=Stride
@@ -26,11 +75,14 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
 										strides=Conv2D.Stride,
 										padding='SAME',
 										data_format=Data_Format)
+			
+			self.SetImageAttr(
+		
 	return Conv2D
 	
 def PoolingFactory(Size,Stride,Type):
 	assert _Type in ['Max','Avg']
-	class Pooling(Operator):
+	class Pooling(ImageOperator):
 		_Size=Size
 		_Stride=Stride
 		_Type=Type
@@ -58,7 +110,7 @@ def PoolingFactory(Size,Stride,Type):
 		
 		
 def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Strides):
-	class TransConv2D(Operator):
+	class TransConv2D(ImageOperator):
 		_ImageCoef=ImageCoef
 		_Strides=Strides
 		_Height=Size
@@ -84,7 +136,7 @@ def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Strides):
 	return TransConv2D	
 	
 def ActivationFactory(Type):
-	class Activation(Operator):
+	class Activation(ImageOperator):
 		_Type=Type
 		def __init__(self,Input):
 			super(Activation,self).__init__(InputList=[Input],InputDegree=1,OutputDegree=1,Name='Activation')
@@ -101,10 +153,10 @@ def ActivationFactory(Type):
 )
 
 def BinaryOpFactory(Type):
-	class BinaryOp(Operator):
+	class BinaryOp(ImageOperator):
 		_Type=Type
 		def __init__(self,Input):
-			super(Activation,self).__init__(InputList=Input,InputDegree=2,OutputDegree=1,Name='Activation')
+			super(BinaryOp,self).__init__(InputList=Input,InputDegree=2,OutputDegree=1,Name='BinaryOp')
 		def ConstructFunc(self,InputList):
 			InputOp1=InputList[0]
 			InputOp2=InputList[1]
@@ -116,4 +168,23 @@ def BinaryOpFactory(Type):
 			elif BinaryOp._Type=='Add':
 				self.Tensor=tf.add(InputOp1Tensor,InputOp2Tensor)
 	return BinaryOp
-				
+
+def ReuseFactory(OutputputNum):
+	class Reuse(ImageOperator):
+		_OutputNum=OutputNum
+		def __init__(self,Input):
+			super(Reuse,self).__init__(InputList=Input,InputeDegree=1,OutputDegree=_OutputNum,Name='Reuse')
+		def ConstructFunc(self,InputList):
+			self.Tensor=InputList[0]
+	return Reuse
+			
+	
+def ConcatFactory(InputNum):
+	class Concat(ImageOperator):
+		_InputNum=InputNum
+		def __init__(self,Input):
+			super(Concat,self).__init__(InputList=Input,InputDegree=_InputNum,OutputDegree=1,Name='Concat')
+		def ConstructFunc(self,InputList):
+			self.Tensor=ConcatOperator(InputList)
+
+	
