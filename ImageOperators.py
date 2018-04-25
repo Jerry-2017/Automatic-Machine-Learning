@@ -164,7 +164,7 @@ def BinaryOpFactory(Type):
 			InputOp2Tensor=InputOp2.GetTensor()
 			assert InputOp1Tensor.shape==InputOp2Tensor.shape
 			if BinaryOp._Type=='Concat':
-				self.Tensor=tf.concat([InputOp1Tensor,InputOp2Tensor],1
+				self.Tensor=ConcatImageTensor([InputOp1Tensor,InputOp2Tensor])
 			elif BinaryOp._Type=='Add':
 				self.Tensor=tf.add(InputOp1Tensor,InputOp2Tensor)
 	return BinaryOp
@@ -186,5 +186,20 @@ def ConcatFactory(InputNum):
 			super(Concat,self).__init__(InputList=Input,InputDegree=_InputNum,OutputDegree=1,Name='Concat')
 		def ConstructFunc(self,InputList):
 			self.Tensor=ConcatOperator(InputList)
-
+	return Concat
 	
+def DenseFactory(HiddenNumCoef):
+	class Dense(ImageOperator):
+		_HiddenNumCoef=HiddenNumCoef
+		def __init__(self,Input):
+			super(Dense,self).__init__(InputList=Input,InputDegree=1,OutputDegree=1,Name='Dense')
+		def ConstructFunc(self,InputList):
+			Input=InputList[0]
+			InputTensor=Input.GetTensor()
+			InputTensor=tf.reshape(InputTensor,[BatchSize,-1])
+            Height,Width,Channel=Input.GetImageAttr()
+            Height=int(HiddenNumCoef*Height)
+            Width=int(HiddenNumCoef*Width)
+            
+			self.SetImageAttr(Height,Width,Channel)
+			self.Tensor=tf.dense(input=InputTensor,units=Height*Width*Channel)

@@ -56,6 +56,7 @@ class Graph:
 		
 		self.VertexNum=VertexNum
 		self.OperatorList=[NoConnection]+OperatorList
+        self.LenOpList=len(self.OperatorList)
 		self.InputNum=InputNum
 		self.OutputNum=OutputNum
 		self.VertexList=[None]*self.VertexNum
@@ -143,6 +144,7 @@ class Graph:
 		self.OperatorApplied=OperatorApplied[:-1]
 	
 	def UnifiedTransform(self,GraphType='2D'):
+        assert GraphType in ['3D','2D','3D_NoNull']
 		"""The output of unified graph could include 2D Convolution & 3D Convolution"""
 		TupleList=[]
 		for i in range(self.VertexVertexOccupied):
@@ -150,14 +152,23 @@ class Graph:
 			for InputVertex in self.VertexInputList[i]:
 				Tuple.append(self.VertexInputDegree[InputVertex])
 			TupleList.append(Tuple)
-		TupleList=SortTupleList(TupleList)
-		NewGraph=[ [None for i in range(self.VertexNum)] for i in range(VertexNum)]
+		TupleList=SortTupleList(TupleList)		
 		if GraphType=='2D':
+            NewGraph=[ [None for i in range(self.VertexNum)] for i in range(VertexNum)]
 			for i in TupleList:
 				for j in TupleList:
 					NewGraph[0][0]=self.IncidenceMatrix[i[0]][j[0]]
 		elif GraphType='3D':
-			assert False,error
+            NewGraph=np.zeros(shape=[self.LenOpList,self.VertexNum,self.VertexNum])
+			for i in TupleList:
+				for j in TupleList:
+					NewGraph[self.IncidenceMatrix[i[0]][j[0]]][0][0]=1
+		elif GraphType='3D_NoNull':
+            NewGraph=np.zeros(shape=[self.LenOpList-1,self.VertexNum,self.VertexNum])
+			for i in TupleList:
+				for j in TupleList:
+                    if self.IncidenceMatrix[i[0]][j[0]]!=0:
+                        NewGraph[self.IncidenceMatrix[i[0]][j[0]]][0][0]=1                    
 		return NewGraph
 		
 	
@@ -172,7 +183,8 @@ class Graph:
 			TensorInput=[]
 			for Index in Option[3:]:
 				TensorInput.append(InternalTensor[Index])
-			InternalTensor[InternalIndex]=self.OperatorList[Option[0]]().ConstructFunc(*TensorInput)
+			InternalTensor[InternalIndex]=self.OperatorList[Option[0]]()
+			InternalTensor[InternalIndex].ConstructFunc(*TensorInput)
 			
 		ToBeConnected=[]
 		for i in range(self.VertexOccupied):
@@ -182,7 +194,15 @@ class Graph:
 		Output=self.ConcatOperator().ConstructFunc(ToBeConnected)
 		return Output
 		
-	def GetParameterCopy(self):
+	def GetParameter(self):
 		ParameterList=[]
-		for i in range(
+		for i in range(self.VertexOccupied):
+			ParameterList.append(self.InternalTensor[i].GetParameter())
+	
+	def SetParameter(self,ParameterList):
+		LenParamList=len(Parameter)
+		assert(LenParamList>=self.VertexOccupied)
+		for i in range(self.VertexOccupied):
+			
+		
 				

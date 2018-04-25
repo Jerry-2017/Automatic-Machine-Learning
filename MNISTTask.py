@@ -28,15 +28,24 @@ Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=2))
 
 #Trans Convolution
 Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=1,ImageCoef=2))
-Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=1,,ImageCoef=2))
+Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=1,ImageCoef=2))
 Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=2))
 Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=2))
 
 #Dense
-Op_List.append(
+Op_List.append(DenseFactory(HiddenNumCoef=1.5))
+Op_List.append(DenseFactory(HiddenNumCoef=0.5))
 
 #Binary_Op
+Op_List.append(BinaryOpFactory(Type='Concat'))
+Op_List.append(BinaryOpFactory(Type='Add'))
 
+#Pooling
+Op_List.append(PoolingFactory(Size=2,Stride=1,Type='Max'))
+Op_List.append(PoolingFactory(Size=2,Stride=1,Type='Avg'))
+
+#Activation
+Op_List.append(Activation(Type='Relu'))
 
 def TaskOutput(OutputList):
 	Output=OutputList[0]
