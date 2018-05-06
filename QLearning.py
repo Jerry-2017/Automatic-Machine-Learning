@@ -1,62 +1,78 @@
 import tensorflow as tf
-from Operator import *
+
 from ImageOperators import *
-from Graph import Graph
+import numpy as np
+from Graph import Graph,Operator
 Data_Format='NHWC'
 
 class QLearning():
     def __init__(self):
-        self.sess=tf.session()
+        self.sess=tf.Session()
+        self.TaskDataInit=False
         pass
         
     def ConstructQFunc3D(self,ImageSize=5,BitDepth=7,BatchSize=5):
         
-        self.QNetData = tf.placeholder(tf.float32 , shape=[None,7,5,5,1],name="input")
-        self.QNetLabel = tf.placeholder(tf.float32, shape=[None], name="label" )
+        self.QNetData = tf.placeholder(tf.float32 , shape=[None,BitDepth,ImageSize,ImageSize,1],name="QNet_input")
+        self.QNetLabel = tf.placeholder(tf.float32, shape=[None,1], name="QNet_label" )
         
-        DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
+        DatasetRaw = tf.data.Dataset.from_tensor_slices((self.QNetData,self.QNetLabel))
         Dataset=DatasetRaw.repeat().batch(BatchSize)
-        DataIter = Dataset.make_initializable_iterator()        
-        NextData,NextLabel = DataIter.get_next()    
-    
-        self.IncidenceMatrix=tf.Variable("Input")
-        self.Label=tf.Variable("Label")
+        self.DataIter = Dataset.make_initializable_iterator()      
+        NextData,NextLabel = self.DataIter.get_next()    
         
-        Conv3D_Layer1_Kernel=tf.placeholder([BitDepth,2,2,1,3])
+        #Conv3D_Layer1_Kernel=tf.Variable(tf.initializers.random_normal(shape=[BitDepth,2,2,1,3]),name="Conv3D_Layer1_Kernel",dtype=tf.float32,)
         #[filter_depth, filter_height, filter_width, in_channels, out_channels]
-        Conv3D_Layer1=tf.nn.conv3d( input=self.IndcidenceMatrix,
-                                    filter=Conv3D_Layer1_Kernel,
-                                    strides=[1,1,1,1,1])
-        
-        Pooling2D_Layer1=tf.nn.max_pool(value=Conv3D_Layer1,
+        Conv3D_Layer1=tf.layers.conv3d( inputs=NextData,
+                                    filters=3,
+                                    kernel_size=(BitDepth,2,2),
+                                    strides=[BitDepth,1,1],
+                                    padding="SAME")
+        print("Conv3D Layer1 shape",Conv3D_Layer1.shape)
+        _shape=Conv3D_Layer1.shape
+        _shape=[-1,*_shape[2:]]
+        Reshape3D2D=tf.reshape(Conv3D_Layer1,shape=_shape)
+        #print(Reshape3D2D.shape)
+        Pooling2D_Layer1=tf.nn.max_pool(value=Reshape3D2D,
                                         ksize=[1,2,2,1],
-                                        strides=[1,1,1,1])
-        
-        Conv2D_Layer2_Kernel=tf.placeholder([2,2,1,1])
-        Conv2D_Layer2=tf.nn.conv2d(input=Pooling2D_Layer1,filter=Conv2D_Layer2_Kernel,strides=[1,1,1,1])
-        
-        Pooling2D_Layer2=tf.nn.max_pool(value=Conv3D_Layer2,
-                                        ksize=[1,2,2,1],
-                                        strides=[1,1,1,1])
-
-        Conv2D_Layer3_Kernel=tf.placeholder([2,2,1,1])
-        Conv2D_Layer3=tf.nn.conv2d(input=Pooling2D_Layer2,filter=Conv2D_Layer3_Kernel)
-        
-        Pooling2D_Layer3=tf.nn.max_pool(value=Conv3D_Layer3,
-                                        ksize=[1,2,2,1],
-                                        strides=[1,1,1,1])                                      
-        Layer3_Shape=Pooling2D_Layer3.shape()
+                                        strides=[1,1,1,1],
+                                        padding="SAME")
                                         
-        Reshape_Layer3=tf.reshape(Pooling2D_Layer3,shape=[Layer3_Shape[0],-1])
+        #Conv2D_Layer2_Kernel=tf.Variable("Conv2D_Layer2_Kernel",shape=[2,2,3,6],dtype=tf.float32,initializer=tf.initializers.random_normal)
+        Conv2D_Layer2=tf.layers.conv2d(inputs=Pooling2D_Layer1,
+                                        filters=6,
+                                        kernel_size=[2,2],
+                                        strides=[1,1],
+                                        padding="SAME")
         
+        Pooling2D_Layer2=tf.nn.max_pool(value=Conv2D_Layer2,
+                                        ksize=[1,2,2,1],
+                                        strides=[1,1,1,1],
+                                        padding="SAME")
+
+        #Conv2D_Layer3_Kernel=tf.Variable("Conv2D_Layer3_Kernel",shape=[2,2,6,12],dtype=tf.float32,initializer=tf.initializers.random_normal)
+        Conv2D_Layer3=tf.layers.conv2d(inputs=Pooling2D_Layer2,
+                                        kernel_size=[2,2],
+                                        filters=12,
+                                        strides=[1,1],
+                                        padding="SAME")
+        
+        Pooling2D_Layer3=tf.nn.max_pool(value=Conv2D_Layer3,
+                                        ksize=[1,2,2,1],
+                                        strides=[1,1,1,1],
+                                        padding="SAME")                                      
+        _shape=Pooling2D_Layer3.shape
+                                        
+        Reshape_Layer3=tf.reshape(Pooling2D_Layer3,shape=[-1,_shape[1]*_shape[2]*_shape[3]])
+        #print(Reshape_Layer3.shape)
         Dense_Layer4=tf.layers.dense(inputs=Reshape_Layer3, units=256, activation=tf.nn.relu)
         Dropout_Layer4=tf.layers.dropout(inputs=Dense_Layer4,rate=0.5)
         
         Output_Layer=tf.layers.dense(inputs=Reshape_Layer3, units=1, activation=tf.nn.sigmoid)
 
-        self.Output=Output_Layer
+        self.QNetOutput=Output_Layer
         
-        self.Loss = tf.losses.mean_squared_error(labels=self.QNetLabel, predictionss=self.QNetOutput)
+        self.Loss = tf.losses.mean_squared_error(labels=self.QNetLabel, predictions=self.QNetOutput)
         
         self.Optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
         self.Train_op = self.Optimizer.minimize(
@@ -70,60 +86,76 @@ class QLearning():
         self.OperatorList=OperatorList
     
     def BuildTaskGraph(self,Graph,Data,Label,BatchSize,OutputDecor):
-    
-        DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
-        Dataset=DatasetRaw.repeat().batch(BatchSize)
-        DataIter = Dataset.one_shot_iterator()      
-        NextData,NextLabel = DataIter.get_next()      
-        Temp_Output=Graph.BuildGraph(NextData)
-        self.TaskOutput,self.TaskLoss=OutputDecor(Output,NextLabel)
+        if not self.TaskDataInit:
+            print(Data.shape)
+            self.TaskNetData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
+            self.TaskNetLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
+            DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
+            Dataset=DatasetRaw.repeat().batch(BatchSize)
+            self.TaskDataIter = Dataset.make_initializable_iterator()      
+            self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()     
+            self.TaskDataInit=True
+            print("TaskDataIter shape",self.TaskNextData.shape)
+        Temp_Output=Graph.BuildGraph([self.TaskNextData])
+        self.sess.run( self.TaskDataIter.initializer(),feed={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:TaskNextLabel})
+        self.TaskOutput,self.TaskLoss=OutputDecor(Output,TaskNextLabel)
         self.TaskTrain = self.Optimizer.minimize(
                 loss=self.TaskLoss,
                 global_step=tf.train.get_global_step())        ## Need to Change
         
     
-    def StartTrial(self,TaskSpecific):
-        LogHistory=TaskSpecific["LogHistory"]
-        OperatorList=TaskSpecific["OperatorList"]
-        NetworkDecor=TaskSpecific["NetworkDecor"]
-        VertexNum=TaskSpecific["OperatorNum"]
-        InputNum=TaskSpecific["InputNum"]
-        OutputNum=TaskSpecific["OutputNum"]
-        BatchSize=TaskSpecific["BatchSize"]
-
-        TaskInput=TaskSpecific["TaskInput"]
-        TaskLabel=TaskSpecific["TaskLabel"]
+    def StartTrial(self,TaskSpec):
+        LogHistory=TaskSpec["LogHistory"]
+        OperatorList=TaskSpec["OperatorList"]
+        NetworkDecor=TaskSpec["NetworkDecor"]
+        VertexNum=TaskSpec["OperatorNum"]
+        InputNum=TaskSpec["InputNum"]
+        OutputNum=TaskSpec["OutputNum"]
+        BatchSize=TaskSpec["BatchSize"]
+        Epochs=TaskSpec["Epochs"]
+        ConcatOperator=TaskSpec["ConcatOperator"]
+        InputOperator=TaskSpec["InputOperator"]
+        
+        TaskInput=TaskSpec["TaskInput"]
+        TaskLabel=TaskSpec["TaskLabel"]
         self.HisNet=[]
         self.HisNetPerf=[]
-        for i in range(Times):
+        
+        self.ConstructQFunc3D(ImageSize=VertexNum,BitDepth=len(OperatorList),BatchSize=BatchSize)
+        self.sess.run(tf.global_variables_initializer())
+        
+        for i in range(Epochs):
             Gph=Graph(  VertexNum=VertexNum,
                         OperatorList=OperatorList,
                         InputNum=InputNum,
-                        OutputNum=OutputNum
+                        OutputNum=OutputNum,
+                        ConcatOperator=ConcatOperator,
+                        InputOperator=InputOperator
                         )
-            OptionList=Gph.ConnectionOptions()
+            OptionList=Gph.ConnectOptions()
             QNetInputList=[]
             for Option in OptionList:   
                 Gph.ApplyOption(Option)
-                QNetInput=Gph.UnifiedTransform('3D')
+                QNetInput=Gph.UnifiedTransform('3D_NoNull')
                 QNetInputList.append(QNetInput)
                 Gph.RevokeOption(Option)
-            
-            QValues=tf.train(self.Output,feed_dict={self.IncidenceMatrix:QNetInputList})
-            _Sum=0
-            for QValue in QValues:
-                _Sum+=np.exp(QValue)
-            ExpDist=[Qvalue/_Sum for QValue in QValues]
-            ChosenOption=self.MakeChoice(Distribution=ExpDist,Choice=OptionList)
+                
+            QNetInput=np.array(QNetInputList)
+            print("QNetInput.shape",QNetInput.shape)
+            self.sess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
+            QValuesAll=self.sess.run(self.QNetOutput)
+            QValuesClip=QValuesAll[:len(OptionList)]
+            print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
+            PossQValues=np.exp(QValuesClip)
+            _Sum=np.sum(PossQValues)
+            ExpDist=PossQValues/_Sum
+            ChosenOption=self.MakeChoice(Distribution=ExpDist,ChoiceList=OptionList)
             
             Gph.ApplyOption(ChosenOption)
             
-            BuiltNet=self.BuildGraph(BatchSize)
-            self.TrainTaskNet(Step=100)
-            
             Step=100
-            self.BuildTaskGraph(Graph=Gph,Data=TaskInput,Label=TaskLabel,OutputDecor=NetworkDecor)
-            self.TrainTaskGraph()
+            self.BuildTaskGraph(Graph=Gph,Data=TaskInput,Label=TaskLabel,OutputDecor=NetworkDecor,BatchSize=BatchSize)
+            self.TrainTaskNet()
             
             HisItem={"OptionList":Gph.GetOptionList(),"TrainStep":Step,"Performance":Performance,"UnifiedNet":Gph.UnifiedTransform('3D')}
             if LogHistory==True:
@@ -133,14 +165,32 @@ class QLearning():
             QStep=100
             self.TrainQNet(self.Output,self.HisNet,self.HisNetPerf,QStep)
     
+    def MakeChoice(self,Distribution,ChoiceList=None):
+        RandPoss=np.random.random()
+        assert abs(np.sum(Distribution)-1)<1e-5
+        AccuPoss=0
+        
+        for i in range(len(Distribution)):
+            AccuPoss+=Distribution[i]
+            if RandPoss<=AccuPoss:
+                choice=i
+                break
+        
+        if ChoiceList is not None:
+            return ChoiceList[choice]
+        else:
+            return choice
+    
     def Log(self,Log):
         print(Log)
                 
     def TrainQNet(self,Output,Data,Label,Step):
+    
         sess=self.sess
-        sess.run(tf.global_variables_initializer())
+        
+        
         for i in range(Step):                
-            _,acc=sess.run([self.Train_op,self.Loss],feed_dict={"input":QNetData,"label":QNetLabel})
+            _,acc=sess.run([self.Train_op,self.Loss])
             print(acc)
                 
     def TrainTaskNet(self,Step=100):

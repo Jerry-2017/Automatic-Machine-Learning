@@ -4,7 +4,7 @@ def SortTupleList(TupleList,StartFrom=0):
 		LengthofTuple1=len(Tuple1)
 		LengthofTuple2=len(Tuple2)
 		CommonLength=min(LengthofTuple1,LengthofTuple2)
-		for i in range(StartFrom=0,CommonLength):
+		for i in range(0,CommonLength):
 			if Tuple1[i]<Tuple2[i]:
 				return True
 		if LengthofTuple1<LengthofTuple2:
