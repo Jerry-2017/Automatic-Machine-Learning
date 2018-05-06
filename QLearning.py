@@ -85,17 +85,7 @@ class QLearning():
     def SetOperatorList(self,OperatorList):
         self.OperatorList=OperatorList
     
-    def BuildTaskGraph(self,Graph,Data,Label,BatchSize,OutputDecor):
-        if not self.TaskDataInit:
-            print(Data.shape)
-            self.TaskNetData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
-            self.TaskNetLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
-            DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
-            Dataset=DatasetRaw.repeat().batch(BatchSize)
-            self.TaskDataIter = Dataset.make_initializable_iterator()      
-            self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()     
-            self.TaskDataInit=True
-            print("TaskDataIter shape",self.TaskNextData.shape)
+    def BuildTaskGraph(self,Graph,OutputDecor):
         Temp_Output=Graph.BuildGraph([self.TaskNextData])
         self.sess.run( self.TaskDataIter.initializer(),feed={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:TaskNextLabel})
         self.TaskOutput,self.TaskLoss=OutputDecor(Output,TaskNextLabel)
@@ -104,6 +94,17 @@ class QLearning():
                 global_step=tf.train.get_global_step())        ## Need to Change
         
     
+    def InitializeTaskGraph(self,Data,Label,BatchSize):
+        print(Data.shape)
+        self.TaskNetData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
+        self.TaskNetLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
+        DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
+        Dataset=DatasetRaw.repeat().batch(BatchSize)
+        self.TaskDataIter = Dataset.make_initializable_iterator()      
+        self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()     
+        self.TaskDataInit=True    
+        print("TaskDataIter shape",self.TaskNextData.shape)
+        
     def StartTrial(self,TaskSpec):
         LogHistory=TaskSpec["LogHistory"]
         OperatorList=TaskSpec["OperatorList"]
@@ -115,6 +116,7 @@ class QLearning():
         Epochs=TaskSpec["Epochs"]
         ConcatOperator=TaskSpec["ConcatOperator"]
         InputOperator=TaskSpec["InputOperator"]
+        TrajectoryLength=TaskSpec["TrajectoryLength"]
         
         TaskInput=TaskSpec["TaskInput"]
         TaskLabel=TaskSpec["TaskLabel"]
@@ -122,6 +124,7 @@ class QLearning():
         self.HisNetPerf=[]
         
         self.ConstructQFunc3D(ImageSize=VertexNum,BitDepth=len(OperatorList),BatchSize=BatchSize)
+        self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)
         self.sess.run(tf.global_variables_initializer())
         
         for i in range(Epochs):
@@ -132,36 +135,43 @@ class QLearning():
                         ConcatOperator=ConcatOperator,
                         InputOperator=InputOperator
                         )
-            OptionList=Gph.ConnectOptions()
-            QNetInputList=[]
-            for Option in OptionList:   
-                Gph.ApplyOption(Option)
-                QNetInput=Gph.UnifiedTransform('3D_NoNull')
-                QNetInputList.append(QNetInput)
-                Gph.RevokeOption(Option)
+            Gph.InitializeCheckOptionInput([self.TaskNextData])
+            for j in range(TrajectoryLength):
+                OptionList=Gph.ConnectOptions()
+                ValidOptionList=[]
                 
-            QNetInput=np.array(QNetInputList)
-            print("QNetInput.shape",QNetInput.shape)
-            self.sess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
-            QValuesAll=self.sess.run(self.QNetOutput)
-            QValuesClip=QValuesAll[:len(OptionList)]
-            print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
-            PossQValues=np.exp(QValuesClip)
-            _Sum=np.sum(PossQValues)
-            ExpDist=PossQValues/_Sum
-            ChosenOption=self.MakeChoice(Distribution=ExpDist,ChoiceList=OptionList)
-            
-            Gph.ApplyOption(ChosenOption)
-            
-            Step=100
-            self.BuildTaskGraph(Graph=Gph,Data=TaskInput,Label=TaskLabel,OutputDecor=NetworkDecor,BatchSize=BatchSize)
-            self.TrainTaskNet()
-            
-            HisItem={"OptionList":Gph.GetOptionList(),"TrainStep":Step,"Performance":Performance,"UnifiedNet":Gph.UnifiedTransform('3D')}
-            if LogHistory==True:
-                self.Log(HisItem)
-            self.HisNet.append(HisItem["UnifiedNet"])
-            self.HisNetPerf.append(HisItem["Performance"])
+                for Option in OptionList:
+                    if Gph.CheckOption(Option):
+                        ValidOptionList.append(Option)
+                QNetInputList=[]
+                for Option in ValidOptionList:   
+                    Gph.ApplyOption(Option)
+                    QNetInput=Gph.UnifiedTransform('3D_NoNull')
+                    QNetInputList.append(QNetInput)
+                    Gph.RevokeOption(Option)
+                    
+                QNetInput=np.array(QNetInputList)
+                print("QNetInput.shape",QNetInput.shape)
+                self.sess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
+                QValuesAll=self.sess.run(self.QNetOutput)
+                QValuesClip=QValuesAll[:len(OptionList)]
+                print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
+                PossQValues=np.exp(QValuesClip)
+                _Sum=np.sum(PossQValues)
+                ExpDist=PossQValues/_Sum
+                ChosenOption=self.MakeChoice(Distribution=ExpDist,ChoiceList=ValidOptionList)
+                
+                Gph.ApplyOption(ChosenOption)
+                
+                Step=100
+                self.BuildTaskGraph(Graph=Gph,OutputDecor=NetworkDecor)
+                self.TrainTaskNet()
+                
+                HisItem={"OptionList":Gph.GetOptionList(),"TrainStep":Step,"Performance":Performance,"UnifiedNet":Gph.UnifiedTransform('3D')}
+                if LogHistory==True:
+                    self.Log(HisItem)
+                self.HisNet.append(HisItem["UnifiedNet"])
+                self.HisNetPerf.append(HisItem["Performance"])
             QStep=100
             self.TrainQNet(self.Output,self.HisNet,self.HisNetPerf,QStep)
     

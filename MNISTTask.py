@@ -75,7 +75,8 @@ TaskSpec={	"LogHistory":True,
             "NetworkDecor":NetworkDecor,
             "BatchSize":BatchSize,
             "ConcatOperator":ConcatOperator,
-            "InputOperator":ImageInput
+            "InputOperator":ImageInput,
+            "TrajectoryLength":10
             }
 
                 

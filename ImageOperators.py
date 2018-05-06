@@ -5,13 +5,13 @@ Data_Format='NHWC'
 
 def ConcatImageTensor(TensorList):
     LenList=len(TensorList)
-    BatchSize=TensorList[0].shape[0]
+    BatchSize=TensorList[0].get_shape().as_list()[0]
     PadTensor=[]
     MaxHeight=0
     MaxWidth=0
     for i in range(LenList):
         TensorShape=TensorList[i].get_shape().as_list()
-        assert TensorShape[0]==BatchSize,'Batchsize inequal'
+        assert TensorShape[0] is None or TensorShape[0]==BatchSize,'Batchsize inequal'
         if TensorShape[1]>MaxHeight:
             MaxHeight=TensorShape[1]
         if TensorShape[2]>MaxWidth:
@@ -19,7 +19,7 @@ def ConcatImageTensor(TensorList):
     for i in range(LenList):
         TensorShape=TensorList[i].get_shape().as_list()
         Paddings=[[0,0],[0,TensorShape[1]-MaxHeight],[0,TensorShape[2]-MaxWidth],[0,0]]
-        PadTensor.append(tf.pad(TensorList[i]),Paddings,'SYMMETRIC')
+        PadTensor.append(tf.pad(TensorList[i],Paddings,'SYMMETRIC'))
     ConcatTensor=tf.concat(PadTensor,axis=3)
     return ConcatTensor
 
@@ -28,17 +28,24 @@ def ConcatOperator(OperatorList):
     for Input in OperatorList:
         print(Input)
         Tensor=Input.GetTensor()
+        TensorShape=Tensor.get_shape().as_list()
         H,W,C=Input.GetImageAttr()
-        if Tensor.get_shape().as_list()==(BatchSize,H,W,C):
+        BatchSize=TensorShape[0]
+        if TensorShape==(TensorShape[0],H,W,C):
             ReshapeTensor=Tensor
         else:
-            ReshapeTensor=Tensor.reshape([BatchSize,H,W,C])
+            ReshapeTensor=tf.reshape(Tensor,[-1,H,W,C])
         TensorList.append(ReshapeTensor)
     Tensor=ConcatImageTensor(TensorList)
     return Tensor
 
 
 class ImageOperator(Operator):
+    def __init__(self,InputList,ID,BuildFlag=True):
+        if len(InputList)==1 and InputList[0] is ImageOperator:
+            self.SetImageAttr(InputList[0].GetImageAttr())
+        super(ImageOperator,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
+    
     def SetImageAttr(self,Height,Width,Channel):
         self.Width=Width
         self.Height=Height
@@ -46,16 +53,20 @@ class ImageOperator(Operator):
     def GetImageAttr(self):
         return self.Width,self.Height,self.Channel
 
+    def CheckValid(self,InputList):
+        return True
 
 class ImageInput(ImageOperator):
     InputDegree=0
     OutputDegree=1
     Name='Input'
-    def __init__(self,InputList,ID):
-        super(ImageInput,self).__init__(InputList=InputList,ID=ID)
+    def __init__(self,InputList,ID,BuildFlag=True):
+        super(ImageInput,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         
     def ConstructFunc(self,InputList):
-        self.Tensor=InputList[0]        
+        self.Tensor=InputList[0]      
+        Shape=self.Tensor.get_shape().as_list()
+        self.SetImageAttr(*Shape[1:])
 
 def Conv2DFactory(Size,ChannelCoef,Stride):
     class Conv2D(ImageOperator):
@@ -66,8 +77,8 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
         InputDegree=1
         OutputDegree=1
         Name='Conv2D'
-        def __init__(self,InputList,ID):
-            super(Conv2D,self).__init__(InputList=InputList,ID=ID)
+        def __init__(self,InputList,ID,BuildFlag=True):
+            super(Conv2D,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def CheckInputList(self,InputList):
             InputOp=InputList[0]
             #_Width
@@ -85,9 +96,20 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
                                         strides=[1,Conv2D._Stride,Conv2D._Stride,1],
                                         padding='SAME',
                                         data_format=Data_Format)
-                
-            self.SetImageAttr(Conv2D._Height,Conv2D._Width,OutputChannelNum)
-        
+            OutputShape=self.Tensor.get_shape().as_list()
+            self.SetImageAttr(*OutputShape[1:])
+            
+        def CheckValid(self,InputList):
+            InputOp=InputList[0]
+            InputTensor=InputOp.GetTensor()
+            #print(InputTensor)
+            Shape=InputTensor.get_shape().as_list()
+            print("Check Valid",Shape)
+            OutputChannelNum=int(Shape[3]*Conv2D._ChannelCoef)
+            if OutputChannelNum>0:
+                return True
+            else:
+                return False
     return Conv2D
     
 def PoolingFactory(Size,Stride,Type):
@@ -99,8 +121,8 @@ def PoolingFactory(Size,Stride,Type):
         InputDegree=1
         OutputDegree=1        
         Name='Pooling'
-        def __init__(self,InputList,ID):
-            super(Pooling,self).__init__(  InputList=InputList,ID=ID )
+        def __init__(self,InputList,ID,BuildFlag=True):
+            super(Pooling,self).__init__(  InputList=InputList,ID=ID,BuildFlag=BuildFlag )
         def ConstructFunc(self,InputList):
             InputOp=InputList[0]
             InputTensor=InputOp.GetTensor()
@@ -128,23 +150,39 @@ def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
         _Width=Size
         _ChannelCoef=ChannelCoef
         Name='TransConv2D'
-        def __init__(self,InputList,ID):
-            super(TransConv2D,self).__init__(InputList=InputList,ID=ID)
+        def __init__(self,InputList,ID,BuildFlag=True):
+            super(TransConv2D,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
             InputOp=InputList[0]
             InputTensor=InputOp.GetTensor()
             Shape=InputTensor.get_shape().as_list()
             OutputChannelNum=int(Shape[3]*TransConv2D._ChannelCoef)
             OutputHeight=int(Shape[1]*TransConv2D._ImageCoef)
-            OutputWidth=int(Shape[2]*TransConv2D._ImageCoef)
-            Filter=tf.get_variable(name="trans_conv_filter",shape=[TransConv2D._Height,TransConv2D._Width,Shape[3],OutputChannelNum],dtype=tf.float32) #"""check"""
-            OutputShape=[Shape[0],OutputHeight,OutputWidth.ImageCoef,OutputChannelNum]
+            OutputWidth=int(Shape[2]*TransConv2D._ImageCoef)            
+            #[height, width, output_channels, in_channels]
+            Filter=tf.get_variable(name="trans_conv_filter",shape=[TransConv2D._Height,TransConv2D._Width,OutputChannelNum,Shape[3]],dtype=tf.float32) #"""check"""
+            OutputShape=[Shape[0],OutputHeight,OutputWidth,OutputChannelNum]
             self.Tensor=tf.nn.conv2d_transpose( value=InputTensor,
                                                 filter=Filter,
                                                 output_shape=OutputShape,
                                                 strides=TransConv2D._Stride,
                                                 padding='SAME',
                                                 data_format=Data_Format)
+            OutputShape=self.Tensor.get_shape().as_list()
+            self.SetImageAttr(*OutputShape[1:])
+            
+        def CheckValid(self,InputList):
+            InputOp=InputList[0]
+            InputTensor=InputOp.GetTensor()
+            #print(InputTensor)
+            Shape=InputTensor.get_shape().as_list()
+            #print(Shape)
+            OutputChannelNum=int(Shape[3]*TransConv2D._ChannelCoef)
+            if OutputChannelNum>0:
+                return True
+            else:
+                return False
+                
     return TransConv2D  
     
 def ActivationFactory(Type):
@@ -153,7 +191,7 @@ def ActivationFactory(Type):
         InputDegree=1
         OutputDegree=1        
         Name='Activation'
-        def __init__(self,InputList,ID):
+        def __init__(self,InputList,ID,BuildFlag=True):
             super(Activation,self).__init__(InputList=InputList,ID=ID)
         def ConstructFunc(self,InputList):
             InputOp=InputList[0]
@@ -172,7 +210,7 @@ def BinaryOpFactory(Type):
         InputDegree=2
         OutputDegree=1
         Name='BinaryOp'
-        def __init__(self,InputList,ID):
+        def __init__(self,InputList,ID,BuildFlag=True):
             super(BinaryOp,self).__init__(InputList=InputList,ID=IDS)
         def ConstructFunc(self,InputList):
             InputOp1=InputList[0]
@@ -192,8 +230,8 @@ def ReuseFactory(OutputputNum):
         InputDegree=1
         OutputDegree=OutputNum
         Name='Reuse'
-        def __init__(self,InputList,ID):
-            super(Reuse,self).__init__(InputList=InputList,ID=ID)
+        def __init__(self,InputList,ID,BuildFlag=True):
+            super(Reuse,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
             self.Tensor=InputList[0]
     return Reuse
@@ -205,10 +243,12 @@ def ConcatFactory(InputNum):
         InputDegree=InputNum
         OutputDegree=1
         Name='Concat'
-        def __init__(self,InputList,ID):
-            super(Concat,self).__init__(InputList=InputList,ID=ID)
+        def __init__(self,InputList,ID,BuildFlag=True):
+            super(Concat,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
             self.Tensor=ConcatOperator(InputList)
+            OutputShape=self.Tensor.get_shape().as_list()
+            self.SetImageAttr(*OutputShape[1:])            
     return Concat
     
 def DenseFactory(HiddenNumCoef):
@@ -217,8 +257,8 @@ def DenseFactory(HiddenNumCoef):
         InputDegree=1
         OutputDegree=1        
         Name='Dense'
-        def __init__(self,InputList,ID):
-            super(Dense,self).__init__(InputList=InputList,ID=ID)
+        def __init__(self,InputList,ID,BuildFlag=True):
+            super(Dense,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
             Input=InputList[0]
             InputTensor=Input.GetTensor()

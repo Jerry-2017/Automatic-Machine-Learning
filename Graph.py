@@ -7,8 +7,8 @@ class Operator:
     Name="GenericOp"
     InputDegree=1
     OutputDegree=1
-    def __init__(self,InputList=None,ID="Default"):
-        if InputList is not None:
+    def __init__(self,InputList=None,ID="Default",BuildFlag=True):
+        if InputList is not None and BuildFlag:
             self.ConstructFunc(InputList)
         else:
             self.Tensor=None
@@ -50,8 +50,8 @@ class Input(Operator):
     InputDegree=0
     OutputDegree=1
     Name='Input'
-    def __init__(self,InputList,ID):        
-        super(Input,self).__init__(InputList=InputList,ID=ID)
+    def __init__(self,InputList,ID,BuildFlag=True):        
+        super(Input,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         
     def ConstructFunc(self,InputList):
         self.Tensor=InputList[0]
@@ -60,8 +60,8 @@ class NoConnection(Operator):
     InputDegree=0
     OutputDegree=0
     Name='NULL'
-    def __init__(self,InputList=None,ID=None):
-        super(NoConnection,self).__init__(InputList=InputList,ID=ID)
+    def __init__(self,InputList=None,ID=None,BuildFlag=True):
+        super(NoConnection,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         
     def ConstructFunc(self,InputList):
         assert False,'Should not appear.'
@@ -70,8 +70,8 @@ class Output(Operator):
     InputDegree=1
     OutputDegree=0
     Name='Output'
-    def __init__(self,_Input):
-        super(Output,self).__init__(InputList=_Input)
+    def __init__(self,_Input,ID=None,BuildFlag=True):
+        super(Output,self).__init__(InputList=_Input,ID=ID,BuildFlag=BuildFlag)
         
     def ConstructFunc(self,InputList):
         self.Tensor=InputList[0]
@@ -120,7 +120,7 @@ class Graph:
                 InputFromList.append(i)
         ConnectionOptions=[]
         #The all possible connections a new opeartor could takes
-        # [OperatorTypeNum, NumberOfInputs, NumberOfOutputs Input1, Input2, ...]
+        # [OperatorTypeNum, NumberOfInputs, NumberOfOutputs , Input1, Input2, ...]
         
         for OperatorIndex in range(1,len(self.OperatorList)):
             #print(self.OperatorList[OperatorIndex])
@@ -158,7 +158,19 @@ class Graph:
         
         self.VertexDepth[VertexAdd]=LastDepth+1
         self.OperatorApplied.append(Option)
+
+    def InitializeCheckOptionInput(self,Inputs):
+        self.BuildGraph(Inputs)
         
+    def CheckOption(self,Option):
+        InputList=[]
+        OperatorIndex=Option[0]
+        for Input in Option[3:]:
+            InputList.append(self.InternalTensor[Input])
+        TempOperator=self.OperatorList[OperatorIndex](InputList,ID="",BuildFlag=False)
+        return TempOperator.CheckValid(InputList)
+            
+    
     def RevokeOption(self,Option):
         self.VertexOccupied-=1
         VertexAdd=self.VertexOccupied
@@ -223,9 +235,10 @@ class Graph:
         ToBeConnected=[]
         for i in range(self.VertexOccupied):
             if self.VertexDegreeQuota[i]>0:
-                ToBeConnected+=[self.OperatorList[i] for _ in range(self.VertexDegreeQuota[i])]
-                
+                ToBeConnected+=[InternalTensor[i] for _ in range(self.VertexDegreeQuota[i])]
+        print(ToBeConnected)
         Output=self.ConcatOperator(ToBeConnected)
+        self.InternalTensor=InternalTensor
         return Output
         
     def GetParameter(self):
