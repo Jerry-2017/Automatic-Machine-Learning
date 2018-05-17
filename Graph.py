@@ -198,22 +198,29 @@ class Graph:
         TupleList=SortTupleList(TupleList)      
         if GraphType=='2D':
             NewGraph=[ [None for i in range(self.VertexNum)] for i in range(VertexNum)]
-            for i in TupleList:
-                for j in TupleList:
-                    NewGraph[0][0]=self.IncidenceMatrix[i[0]][j[0]]
+            for i in range(len(TupleList)):
+                for j in range(len(TupleList)):
+                    Rawi=TupleList[i][0]
+                    Rawj=TupleList[j][0]
+                    NewGraph[i][j]=self.IncidenceMatrix[Rawi][Rawj]
         elif GraphType=='3D':
             NewGraph=np.zeros(shape=[self.LenOpList,self.VertexNum,self.VertexNum,1])
-            for i in TupleList:
-                for j in TupleList:
+            for i in range(len(TupleList)):
+                for j in range(len(TupleList)):
                     # Operation Number, Vertex Size, Vertex Size, Channel Size
-                    NewGraph[self.IncidenceMatrix[i[0]][j[0]]][0][0][0]=1
+                    Rawi=TupleList[i][0]
+                    Rawj=TupleList[j][0]
+                    NewGraph[self.IncidenceMatrix[Rawi][Rawj]][i][j][0]=1
         elif GraphType=='3D_NoNull':
+            #print("l",self.LenOpList,self.OperatorList)
             NewGraph=np.zeros(shape=[self.LenOpList-1,self.VertexNum,self.VertexNum,1])
-            for i in TupleList:
-                for j in TupleList:
-                    if self.IncidenceMatrix[i[0]][j[0]]!=0:
-                        NewGraph[self.IncidenceMatrix[i[0]][j[0]]-1][0][0][0]=1                    
-                        
+            for i in range(len(TupleList)):
+                for j in range(len(TupleList)):
+                    Rawi=TupleList[i][0]
+                    Rawj=TupleList[j][0]                 
+                    if self.IncidenceMatrix[Rawi][Rawj]!=0:                   
+                        NewGraph[self.IncidenceMatrix[Rawi][Rawj]-1][i][j][0]=1                    
+                    #print(NewGraph.shape)    
         return NewGraph
         
     
@@ -228,7 +235,7 @@ class Graph:
             TensorInput=[]
             for Index in Option[3:]:
                 TensorInput.append(InternalTensor[Index])
-            ScopeName="%d_Node%d"%(ScopeID,Index)
+            ScopeName="%d_Node%d"%(ScopeID,InternalIndex)
             with tf.variable_scope(ScopeName,reuse=tf.AUTO_REUSE) as scope:              
                 InternalTensor[InternalIndex]=self.OperatorList[Option[0]](InputList=TensorInput,ID=ScopeName)
             InternalIndex+=1

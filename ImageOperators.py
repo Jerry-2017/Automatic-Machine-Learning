@@ -188,8 +188,9 @@ def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
             #                                    strides=[1,TransConv2D._Stride,TransConv2D._Stride,1],
             #                                    padding='SAME',
             #                                    data_format=Data_Format)
-            self.Tensor=tf.layers.conv2d_transpose( input=InputTensor,
+            self.Tensor=tf.layers.conv2d_transpose( inputs=InputTensor,
                                                 filters=OutputChannelNum,
+                                                kernel_size=(TransConv2D._Height,TransConv2D._Width),
                                                 strides=[TransConv2D._Stride,TransConv2D._Stride],
                                                 padding='SAME',
                                                 data_format="channels_last")

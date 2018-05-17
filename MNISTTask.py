@@ -64,7 +64,8 @@ def NetworkDecor(Input,Labels):
     Reshape=tf.reshape(Input,shape=[BatchSize,-1])
     Output=tf.layers.dense(inputs=Reshape,units=10,activation=tf.nn.softmax)
     OneHotLabels=tf.one_hot(Labels,depth=10,axis=-1)
-    Loss=tf.nn.softmax_cross_entropy_with_logits_v2(labels=OneHotLabels,logits=Output)
+    Loss=tf.losses.softmax_cross_entropy(onehot_labels=OneHotLabels,logits=Output)
+    #Loss=tf.reshape(Loss,shape=[-1,1])
     return Output,Loss
     
 RL_Exp=QLearning()
