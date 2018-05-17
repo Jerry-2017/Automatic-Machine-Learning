@@ -217,7 +217,7 @@ class Graph:
         return NewGraph
         
     
-    def BuildGraph(self,Inputs):
+    def BuildGraph(self,Inputs,ScopeID=0):
         """TensorBuild?"""
         InternalTensor=[None for i in range(self.VertexNum)]
         InternalIndex=len(Inputs)
@@ -228,15 +228,16 @@ class Graph:
             TensorInput=[]
             for Index in Option[3:]:
                 TensorInput.append(InternalTensor[Index])
-            ScopeName="TaskNet_Node%d"%Index
+            ScopeName="%d_Node%d"%(ScopeID,Index)
             with tf.variable_scope(ScopeName,reuse=tf.AUTO_REUSE) as scope:              
                 InternalTensor[InternalIndex]=self.OperatorList[Option[0]](InputList=TensorInput,ID=ScopeName)
+            InternalIndex+=1
             
         ToBeConnected=[]
         for i in range(self.VertexOccupied):
             if self.VertexDegreeQuota[i]>0:
-                ToBeConnected+=[InternalTensor[i] for _ in range(self.VertexDegreeQuota[i])]
-        print(ToBeConnected)
+                ToBeConnected.extend([InternalTensor[i] for _ in range(self.VertexDegreeQuota[i])])
+        #print(ToBeConnected)
         Output=self.ConcatOperator(ToBeConnected)
         self.InternalTensor=InternalTensor
         return Output

@@ -1,3 +1,4 @@
+import tensorflow as tf
 from mnist import MNIST
 from QLearning import QLearning
 from ImageOperators import ConcatOperator,ImageInput,Conv2DFactory,PoolingFactory,TransConv2DFactory,ActivationFactory,BinaryOpFactory,ReuseFactory,DenseFactory
@@ -51,19 +52,23 @@ Op_List.append(PoolingFactory(Size=2,Stride=1,Type='Avg'))
 Op_List.append(ActivationFactory(Type='Relu'))
 
 def TaskOutput(OutputList):
-	Output=OutputList[0]
-	OutTensor=Output.GetTensor()
-	OutTensorShape=OutTensor.shape()
-	
-	Reshape=OutTensor.reshape([BatchSize,-1])
-	Output=tf.layer.dense(inputs=Reshape,units=10,activation=tf.softmax)
-	return Output
+    Output=OutputList[0]
+    OutTensor=Output.GetTensor()
+    OutTensorShape=OutTensor.shape().get_list()
+    
+    Reshape=OutTensor.reshape([BatchSize,-1])
+    Output=tf.layer.dense(inputs=Reshape,units=10,activation=tf.softmax)
+    return Output
 
-def NetworkDecor(Input):
-    return Input
+def NetworkDecor(Input,Labels):
+    Reshape=tf.reshape(Input,shape=[BatchSize,-1])
+    Output=tf.layers.dense(inputs=Reshape,units=10,activation=tf.nn.softmax)
+    OneHotLabels=tf.one_hot(Labels,depth=10,axis=-1)
+    Loss=tf.nn.softmax_cross_entropy_with_logits_v2(labels=OneHotLabels,logits=Output)
+    return Output,Loss
     
 RL_Exp=QLearning()
-TaskSpec={	"LogHistory":True,
+TaskSpec={  "LogHistory":True,
             "OperatorList":Op_List,
             "NetworkGenerator":TaskOutput,
             "OperatorNum":OperatorLimit,
@@ -76,7 +81,7 @@ TaskSpec={	"LogHistory":True,
             "BatchSize":BatchSize,
             "ConcatOperator":ConcatOperator,
             "InputOperator":ImageInput,
-            "TrajectoryLength":10
+            "TrajectoryLength":OperatorLimit-4
             }
 
                 

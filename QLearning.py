@@ -72,11 +72,11 @@ class QLearning():
 
         self.QNetOutput=Output_Layer
         
-        self.Loss = tf.losses.mean_squared_error(labels=self.QNetLabel, predictions=self.QNetOutput)
+        self.QNetLoss = tf.losses.mean_squared_error(labels=self.QNetLabel, predictions=self.QNetOutput)
         
         self.Optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
-        self.Train_op = self.Optimizer.minimize(
-                loss=self.Loss,
+        self.QNetTrain_op = self.Optimizer.minimize(
+                loss=self.QNetLoss,
                 global_step=tf.train.get_global_step())           
     
     def SetNetworkGenerator(self,NetworkGenerator):
@@ -85,17 +85,18 @@ class QLearning():
     def SetOperatorList(self,OperatorList):
         self.OperatorList=OperatorList
     
-    def BuildTaskGraph(self,Graph,OutputDecor):
-        Temp_Output=Graph.BuildGraph([self.TaskNextData])
-        self.sess.run( self.TaskDataIter.initializer(),feed={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:TaskNextLabel})
-        self.TaskOutput,self.TaskLoss=OutputDecor(Output,TaskNextLabel)
+    def BuildTaskGraph(self,Graph,OutputDecor,ID):
+        with tf.variable_scope("TaskNet") as scope:
+            Temp_Output=Graph.BuildGraph([self.TaskNextData],ScopeID=ID)
+        self.sess.run( self.TaskDataIter.initializer)#,feed_dict={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:self.TaskNextLabel})
+        self.TaskOutput,self.TaskLoss=OutputDecor(Temp_Output,self.TaskNextLabel)
         self.TaskTrain = self.Optimizer.minimize(
                 loss=self.TaskLoss,
                 global_step=tf.train.get_global_step())        ## Need to Change
         
     
     def InitializeTaskGraph(self,Data,Label,BatchSize):
-        print(Data.shape)
+        #print(Data.shape)
         self.TaskNetData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
         self.TaskNetLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
         DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
@@ -123,6 +124,8 @@ class QLearning():
         self.HisNet=[]
         self.HisNetPerf=[]
         
+        #ImageOperators
+        SetBatchSize(BatchSize)
         self.ConstructQFunc3D(ImageSize=VertexNum,BitDepth=len(OperatorList),BatchSize=BatchSize)
         self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)
         self.sess.run(tf.global_variables_initializer())
@@ -164,16 +167,17 @@ class QLearning():
                 Gph.ApplyOption(ChosenOption)
                 
                 Step=100
-                self.BuildTaskGraph(Graph=Gph,OutputDecor=NetworkDecor)
-                self.TrainTaskNet()
+                print(i,j)
+                self.BuildTaskGraph(Graph=Gph,OutputDecor=NetworkDecor,ID=i)
+                Performance=self.TrainTaskNet()
                 
-                HisItem={"OptionList":Gph.GetOptionList(),"TrainStep":Step,"Performance":Performance,"UnifiedNet":Gph.UnifiedTransform('3D')}
+                HisItem={"OptionList":Gph.ConnectOptions(),"TrainStep":Step,"Performance":Performance,"UnifiedNet":Gph.UnifiedTransform('3D')}
                 if LogHistory==True:
                     self.Log(HisItem)
                 self.HisNet.append(HisItem["UnifiedNet"])
                 self.HisNetPerf.append(HisItem["Performance"])
             QStep=100
-            self.TrainQNet(self.Output,self.HisNet,self.HisNetPerf,QStep)
+            self.TrainQNet(self.QNetOutput,self.HisNet,self.HisNetPerf,QStep)
     
     def MakeChoice(self,Distribution,ChoiceList=None):
         RandPoss=np.random.random()
@@ -192,7 +196,8 @@ class QLearning():
             return choice
     
     def Log(self,Log):
-        print(Log)
+        pass
+        #print(Log)
                 
     def TrainQNet(self,Output,Data,Label,Step):
     
@@ -200,8 +205,8 @@ class QLearning():
         
         
         for i in range(Step):                
-            _,acc=sess.run([self.Train_op,self.Loss])
-            print(acc)
+            _,acc=sess.run([self.QNetTrain_op,self.QNetLoss],feed_dict={self.QNet_Data:Data,self.QNet_Label:Label})
+            #print(acc)
                 
     def TrainTaskNet(self,Step=100):
         sess=self.sess
@@ -209,4 +214,5 @@ class QLearning():
         for i in range(Step):                
             _,acc=sess.run([self.TaskTrain,self.TaskLoss])
             print(acc)
+        return acc
    

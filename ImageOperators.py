@@ -3,9 +3,23 @@ from Graph import Operator
 
 Data_Format='NHWC'
 
+def get_size_except_dim(Tensor,dim=0):
+    TensorShape=Tensor.get_shape().as_list()
+    _dim=0
+    size=1
+    for i in TensorShape:
+        if _dim!=dim:
+            size*=i
+        _dim+=1
+    return size
+
+def SetBatchSize(Batch_Size):
+    global BatchSize
+    BatchSize=Batch_Size
+
 def ConcatImageTensor(TensorList):
     LenList=len(TensorList)
-    BatchSize=TensorList[0].get_shape().as_list()[0]
+    #BatchSize=TensorList[0].get_shape().as_list()[0]
     PadTensor=[]
     MaxHeight=0
     MaxWidth=0
@@ -18,23 +32,23 @@ def ConcatImageTensor(TensorList):
             MaxWidth=TensorShape[2]
     for i in range(LenList):
         TensorShape=TensorList[i].get_shape().as_list()
-        Paddings=[[0,0],[0,TensorShape[1]-MaxHeight],[0,TensorShape[2]-MaxWidth],[0,0]]
-        PadTensor.append(tf.pad(TensorList[i],Paddings,'SYMMETRIC'))
+        Paddings=[[0,0],[0,MaxHeight-TensorShape[1]],[0,MaxWidth-TensorShape[2]],[0,0]]
+        PadTensor.append(tf.pad(TensorList[i],Paddings,'CONSTANT'))
     ConcatTensor=tf.concat(PadTensor,axis=3)
     return ConcatTensor
 
 def ConcatOperator(OperatorList):
     TensorList=[]
+    print(OperatorList)
     for Input in OperatorList:
-        print(Input)
+        #print(Input)
         Tensor=Input.GetTensor()
         TensorShape=Tensor.get_shape().as_list()
         H,W,C=Input.GetImageAttr()
-        BatchSize=TensorShape[0]
-        if TensorShape==(TensorShape[0],H,W,C):
+        if TensorShape==(None,H,W,C):
             ReshapeTensor=Tensor
         else:
-            ReshapeTensor=tf.reshape(Tensor,[-1,H,W,C])
+            ReshapeTensor=tf.reshape(Tensor,[BatchSize,H,W,C])
         TensorList.append(ReshapeTensor)
     Tensor=ConcatImageTensor(TensorList)
     return Tensor
@@ -56,6 +70,12 @@ class ImageOperator(Operator):
     def CheckValid(self,InputList):
         return True
 
+    def RestoreShape(self,Tensor):
+        if Tensor.get_shape().as_list()!=[None,self.Height,self.Width,self.Channel]:
+            return tf.reshape(Tensor,shape=[-1,self.Height,self.Width,self.Channel])
+        else:
+            return Tensor
+        
 class ImageInput(ImageOperator):
     InputDegree=0
     OutputDegree=1
@@ -84,10 +104,10 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
             #_Width
         def ConstructFunc(self,InputList):
             InputOp=InputList[0]
-            InputTensor=InputOp.GetTensor()
+            InputTensor=InputOp.GetTensor()            
             #print(InputTensor)
             Shape=InputTensor.get_shape().as_list()
-            #print(Shape)
+            print(Conv2D._ChannelCoef)
             OutputChannelNum=int(Shape[3]*Conv2D._ChannelCoef)
             assert(OutputChannelNum>=1)
             Filter=tf.get_variable(name="conv_filter",shape=[Conv2D._Height,Conv2D._Width,Shape[3],OutputChannelNum],dtype=tf.float32)
@@ -104,7 +124,7 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
             InputTensor=InputOp.GetTensor()
             #print(InputTensor)
             Shape=InputTensor.get_shape().as_list()
-            print("Check Valid",Shape)
+            #print("Check Valid",Shape)
             OutputChannelNum=int(Shape[3]*Conv2D._ChannelCoef)
             if OutputChannelNum>0:
                 return True
@@ -144,7 +164,7 @@ def PoolingFactory(Size,Stride,Type):
     
 def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
     class TransConv2D(ImageOperator):
-        _ImageCoef=ImageCoef
+
         _Stride=Stride
         _Height=Size
         _Width=Size
@@ -157,17 +177,22 @@ def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
             InputTensor=InputOp.GetTensor()
             Shape=InputTensor.get_shape().as_list()
             OutputChannelNum=int(Shape[3]*TransConv2D._ChannelCoef)
-            OutputHeight=int(Shape[1]*TransConv2D._ImageCoef)
-            OutputWidth=int(Shape[2]*TransConv2D._ImageCoef)            
+            #OutputHeight=int(Shape[1]*TransConv2D._ImageCoef)
+            #OutputWidth=int(Shape[2]*TransConv2D._ImageCoef)            
             #[height, width, output_channels, in_channels]
-            Filter=tf.get_variable(name="trans_conv_filter",shape=[TransConv2D._Height,TransConv2D._Width,OutputChannelNum,Shape[3]],dtype=tf.float32) #"""check"""
-            OutputShape=[Shape[0],OutputHeight,OutputWidth,OutputChannelNum]
-            self.Tensor=tf.nn.conv2d_transpose( value=InputTensor,
-                                                filter=Filter,
-                                                output_shape=OutputShape,
-                                                strides=TransConv2D._Stride,
+            #Filter=tf.get_variable(name="trans_conv_filter",shape=[TransConv2D._Height,TransConv2D._Width,OutputChannelNum,Shape[3]],dtype=tf.float32) #"""check"""
+            #OutputShape=[BatchSize,OutputHeight,OutputWidth,OutputChannelNum]
+            #self.Tensor=tf.nn.conv2d_transpose( value=InputTensor,
+            #                                    filter=Filter,
+            #                                    output_shape=OutputShape,
+            #                                    strides=[1,TransConv2D._Stride,TransConv2D._Stride,1],
+            #                                    padding='SAME',
+            #                                    data_format=Data_Format)
+            self.Tensor=tf.layers.conv2d_transpose( input=InputTensor,
+                                                filters=OutputChannelNum,
+                                                strides=[TransConv2D._Stride,TransConv2D._Stride],
                                                 padding='SAME',
-                                                data_format=Data_Format)
+                                                data_format="channels_last")
             OutputShape=self.Tensor.get_shape().as_list()
             self.SetImageAttr(*OutputShape[1:])
             
@@ -192,7 +217,7 @@ def ActivationFactory(Type):
         OutputDegree=1        
         Name='Activation'
         def __init__(self,InputList,ID,BuildFlag=True):
-            super(Activation,self).__init__(InputList=InputList,ID=ID)
+            super(Activation,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
             InputOp=InputList[0]
             InputTensor=InputOp.GetTensor()
@@ -201,7 +226,7 @@ def ActivationFactory(Type):
             elif  Activation._Type=='Leaky_Relu':
                 self.Tensor=tf.nn.leaky_relu(features=InputTensor)
             elif  Activation._Type=='L2_Norm':
-                self.Tensor=tf.nn.l2_normalize(features=InputTensor)
+                self.Tensor=tf.nn.l2_normalize(features=InputTensor)      
     return Activation
 
 def BinaryOpFactory(Type):
@@ -211,17 +236,31 @@ def BinaryOpFactory(Type):
         OutputDegree=1
         Name='BinaryOp'
         def __init__(self,InputList,ID,BuildFlag=True):
-            super(BinaryOp,self).__init__(InputList=InputList,ID=IDS)
+            super(BinaryOp,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
             InputOp1=InputList[0]
             InputOp2=InputList[1]
             InputOp1Tensor=InputOp1.GetTensor()
             InputOp2Tensor=InputOp2.GetTensor()
-            assert InputOp1Tensor.shape==InputOp2Tensor.shape
             if BinaryOp._Type=='Concat':
                 self.Tensor=ConcatImageTensor([InputOp1Tensor,InputOp2Tensor])
             elif BinaryOp._Type=='Add':
+                assert InputOp1Tensor.shape==InputOp2Tensor.shape
                 self.Tensor=tf.add(InputOp1Tensor,InputOp2Tensor)
+            OutputShape=self.Tensor.get_shape().as_list()
+            self.SetImageAttr(*OutputShape[1:])    
+            
+        def CheckValid(self,InputList):
+            InputOp1=InputList[0]
+            InputOp2=InputList[1]
+            InputOp1Tensor=InputOp1.GetTensor()
+            InputOp2Tensor=InputOp2.GetTensor()
+            #print("cmp",InputOp1Tensor.shape.as_list(),InputOp2Tensor.shape.as_list())
+            if BinaryOp._Type=='Add':                 
+                if InputOp1Tensor.shape.as_list()!=InputOp2Tensor.shape.as_list():
+                    return False
+            return True
+                       
     return BinaryOp
 
 def ReuseFactory(OutputputNum):
@@ -262,12 +301,13 @@ def DenseFactory(HiddenNumCoef):
         def ConstructFunc(self,InputList):
             Input=InputList[0]
             InputTensor=Input.GetTensor()
-            InputTensor=tf.reshape(InputTensor,[BatchSize,-1])
+            #BatchSize=InputTensor.get_shape().as_list()[0]
+            InputTensor=tf.reshape(InputTensor,[BatchSize,get_size_except_dim(InputTensor)])
             Height,Width,Channel=Input.GetImageAttr()
             Height=int(HiddenNumCoef*Height)
             Width=int(HiddenNumCoef*Width)
             
-            self.SetImageAttr(Height,Width,Channel)
-            self.Tensor=tf.layers.Dense(input=InputTensor,units=Height*Width*Channel)
-    
+            self.SetImageAttr(Height,Width,Channel)            
+            self.Tensor=tf.layers.dense(inputs=InputTensor,units=Height*Width*Channel,activation=tf.nn.relu)
+            self.Tensor=self.RestoreShape(self.Tensor)
     return Dense
