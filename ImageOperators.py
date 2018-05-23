@@ -3,6 +3,11 @@ from Graph import Operator
 
 Data_Format='NHWC'
 
+OUTPUT_CHANNEL_MAX=128
+OUTPUT_IMAGE_WIDTH_MAX=60
+OUTPUT_IMAGE_HEIGHT_MAX=60
+MAX_DENSE_CONNECTION=500
+
 def get_size_except_dim(Tensor,dim=0):
     TensorShape=Tensor.get_shape().as_list()
     _dim=0
@@ -11,8 +16,8 @@ def get_size_except_dim(Tensor,dim=0):
         if _dim!=dim:
             size*=i
         _dim+=1
-    return size
-
+    return size    
+    
 def SetBatchSize(Batch_Size):
     global BatchSize
     BatchSize=Batch_Size
@@ -37,9 +42,17 @@ def ConcatImageTensor(TensorList):
     ConcatTensor=tf.concat(PadTensor,axis=3)
     return ConcatTensor
 
+def ConcatOperatorDense(OperatorList):
+    TensorList=[]
+    TensorList=[t.GetTensor() for t in OperatorList]
+    TensorReshape=[tf.reshape(t,[-1,get_size_except_dim(t)]) for t in TensorList]
+    result=tf.concat(values=TensorReshape,axis=1)
+    print("Concat Shape",result.get_shape().as_list())
+    return result
+    
 def ConcatOperator(OperatorList):
     TensorList=[]
-    print(OperatorList)
+    #print(OperatorList)
     for Input in OperatorList:
         #print(Input)
         Tensor=Input.GetTensor()
@@ -56,9 +69,14 @@ def ConcatOperator(OperatorList):
 
 class ImageOperator(Operator):
     def __init__(self,InputList,ID,BuildFlag=True):
-        if len(InputList)==1 and InputList[0] is ImageOperator:
-            self.SetImageAttr(InputList[0].GetImageAttr())
+        if len(InputList)==1 and isinstance(InputList[0],ImageOperator):
+            self.SetImageAttr(*InputList[0].GetImageAttr())
         super(ImageOperator,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
+        if self.Tensor is not None:
+            TS=self.Tensor.get_shape().as_list()
+            if len(TS)==4:
+                self.SetImageAttr(TS[1],TS[2],TS[3])
+            
     
     def SetImageAttr(self,Height,Width,Channel):
         self.Width=Width
@@ -124,9 +142,9 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
             InputTensor=InputOp.GetTensor()
             #print(InputTensor)
             Shape=InputTensor.get_shape().as_list()
-            #print("Check Valid",Shape)
+            #print("Check SAME",Shape)
             OutputChannelNum=int(Shape[3]*Conv2D._ChannelCoef)
-            if OutputChannelNum>0:
+            if OutputChannelNum>0  and OutputChannelNum<OUTPUT_CHANNEL_MAX and  Conv2D._Stride<Shape[1] and  Conv2D._Stride<Shape[2]:
                 return True
             else:
                 return False
@@ -146,18 +164,18 @@ def PoolingFactory(Size,Stride,Type):
         def ConstructFunc(self,InputList):
             InputOp=InputList[0]
             InputTensor=InputOp.GetTensor()
-            if Pooling.Type=='Max':
-                self.Tensor=tf.nn.max_pool( InputTensor,
-                                                Size=Pooling._Size,
-                                                strides=Pooling._Stride,
+            if Pooling._Type=='Max':
+                self.Tensor=tf.layers.max_pooling2d( inputs=InputTensor,
+                                                pool_size=(Pooling._Size,Pooling._Size),
+                                                strides=(Pooling._Stride,Pooling._Stride),
                                                 padding='SAME',
-                                                data_format=Data_Format)
-            elif Pooling.Type=='Avg':
-                self.Tensor=tf.nn.avg_pool( InputTensor,
-                                                Size=Pooling._Size,
-                                                strides=Pooling._Stride,
+                                                data_format='channels_last')
+            elif Pooling._Type=='Avg':
+                self.Tensor=tf.layers.average_pooling2d( inputs=InputTensor,
+                                                pool_size=(Pooling._Size,Pooling._Size),
+                                                strides=(Pooling._Stride,Pooling._Stride),
                                                 padding='SAME',
-                                                data_format=Data_Format)
+                                                data_format='channels_last')
 
         
     return Pooling
@@ -204,7 +222,7 @@ def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
             Shape=InputTensor.get_shape().as_list()
             #print(Shape)
             OutputChannelNum=int(Shape[3]*TransConv2D._ChannelCoef)
-            if OutputChannelNum>0:
+            if OutputChannelNum>0 and OutputChannelNum<OUTPUT_CHANNEL_MAX and InputOp.Width<=OUTPUT_IMAGE_WIDTH_MAX and InputOp.Height<=OUTPUT_IMAGE_HEIGHT_MAX:
                 return True
             else:
                 return False
@@ -246,10 +264,8 @@ def BinaryOpFactory(Type):
             if BinaryOp._Type=='Concat':
                 self.Tensor=ConcatImageTensor([InputOp1Tensor,InputOp2Tensor])
             elif BinaryOp._Type=='Add':
-                assert InputOp1Tensor.shape==InputOp2Tensor.shape
+                assert InputOp1Tensor.shape.as_list()[1:]==InputOp2Tensor.shape.as_list()[1:]
                 self.Tensor=tf.add(InputOp1Tensor,InputOp2Tensor)
-            OutputShape=self.Tensor.get_shape().as_list()
-            self.SetImageAttr(*OutputShape[1:])    
             
         def CheckValid(self,InputList):
             InputOp1=InputList[0]
@@ -258,13 +274,13 @@ def BinaryOpFactory(Type):
             InputOp2Tensor=InputOp2.GetTensor()
             #print("cmp",InputOp1Tensor.shape.as_list(),InputOp2Tensor.shape.as_list())
             if BinaryOp._Type=='Add':                 
-                if InputOp1Tensor.shape.as_list()!=InputOp2Tensor.shape.as_list():
+                if InputOp1Tensor.shape.as_list()[1:]!=InputOp2Tensor.shape.as_list()[1:]:
                     return False
             return True
                        
     return BinaryOp
 
-def ReuseFactory(OutputputNum):
+def ReuseFactory(OutputNum):
     class Reuse(ImageOperator):
         _OutputNum=OutputNum
         InputDegree=1
@@ -273,7 +289,7 @@ def ReuseFactory(OutputputNum):
         def __init__(self,InputList,ID,BuildFlag=True):
             super(Reuse,self).__init__(InputList=InputList,ID=ID,BuildFlag=BuildFlag)
         def ConstructFunc(self,InputList):
-            self.Tensor=InputList[0]
+            self.Tensor=InputList[0].GetTensor()
     return Reuse
             
     
@@ -310,5 +326,15 @@ def DenseFactory(HiddenNumCoef):
             
             self.SetImageAttr(Height,Width,Channel)            
             self.Tensor=tf.layers.dense(inputs=InputTensor,units=Height*Width*Channel,activation=tf.nn.relu)
-            self.Tensor=self.RestoreShape(self.Tensor)
+            self.Tensor=self.RestoreShape(self.Tensor)            
+        def CheckValid(self,InputList):
+            Input=InputList[0]
+            InputTensor=Input.GetTensor()
+            dim=get_size_except_dim(InputTensor)
+            Height,Width,Channel=Input.GetImageAttr()
+            Height=int(HiddenNumCoef*Height)
+            Width=int(HiddenNumCoef*Width)            
+            if Height*Width*Channel<1 or dim*HiddenNumCoef*HiddenNumCoef>MAX_DENSE_CONNECTION:
+                return False
+            return True
     return Dense

@@ -89,7 +89,7 @@ class Graph:
         self.VertexOpType=[None]*self.VertexNum
         self.IncidenceMatrix=[[0 for i in range(self.VertexNum)] for j in range(self.VertexNum)]
         self.ConcatOperator=ConcatOperator
-        
+                
         self.OperatorApplied=[]
         self.VertexDepth=[0 for i in range(self.VertexNum)]
         self.VertexInputDegree=[0 for i in range(self.VertexNum)]
@@ -149,6 +149,7 @@ class Graph:
             # The operator name from index 1
             LastDepth=min(LastDepth,self.VertexDepth[VertexFrom])
             self.VertexOutputDegree[VertexFrom]+=1
+            self.VertexDegreeQuota[VertexFrom]-=1
             self.VertexOutputList[VertexFrom].append(VertexAdd)
             self.VertexInputList[VertexAdd].append(VertexFrom)
             
@@ -180,6 +181,7 @@ class Graph:
         for VertexFrom in Option[3:]:
             self.IncidenceMatrix[VertexFrom][VertexAdd]=0
             self.VertexOutputDegree[VertexFrom]-=1
+            self.VertexDegreeQuota[VertexFrom]+=1
             self.VertexOutputList[VertexFrom]=self.VertexOutputList[VertexFrom][:-1]
             
         self.VertexDegreeQuota[VertexAdd]=0
@@ -192,8 +194,11 @@ class Graph:
         TupleList=[]
         for i in range(self.VertexOccupied):
             Tuple=[i,self.VertexDepth[i],self.VertexInputDegree[i]]
+            TupleTemp=[]
             for InputVertex in self.VertexInputList[i]:
-                Tuple.append(self.VertexInputDegree[InputVertex])
+                TupleTemp.append(self.VertexInputDegree[InputVertex])
+            TupleTemp.sort()
+            Tuple.extend(TupleTemp)
             TupleList.append(Tuple)
         TupleList=SortTupleList(TupleList)      
         if GraphType=='2D':
@@ -222,10 +227,21 @@ class Graph:
                         NewGraph[self.IncidenceMatrix[Rawi][Rawj]-1][i][j][0]=1                    
                     #print(NewGraph.shape)    
         return NewGraph
-        
+    
+    def StrOptionList(self):
+        StrRes=[]
+        InternalIndex=self.InputNum
+        for Option in self.OperatorApplied:
+            InputNode=Option[3:]
+            OperatorName=type(self.InternalTensor[InternalIndex]).Name
+            StrRes.append("%s %s"%(OperatorName,str(InputNode)))
+            InternalIndex+=1
+        return StrRes
+            
     
     def BuildGraph(self,Inputs,ScopeID=0):
         """TensorBuild?"""
+        assert len(Inputs)==self.InputNum
         InternalTensor=[None for i in range(self.VertexNum)]
         InternalIndex=len(Inputs)
         for i in range(InternalIndex):
@@ -244,10 +260,17 @@ class Graph:
         for i in range(self.VertexOccupied):
             if self.VertexDegreeQuota[i]>0:
                 ToBeConnected.extend([InternalTensor[i] for _ in range(self.VertexDegreeQuota[i])])
-        #print(ToBeConnected)
+        print(ToBeConnected,InternalTensor)
         Output=self.ConcatOperator(ToBeConnected)
         self.InternalTensor=InternalTensor
         return Output
+
+    def GetGraphNodeShape(self):
+        ShapeOp=[]
+        for Tensor in self.InternalTensor:
+            if Tensor is not None:
+                ShapeOp.append(tf.shape(Tensor.GetTensor()))
+        return ShapeOp
         
     def GetParameter(self):
         ParameterList=[]

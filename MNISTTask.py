@@ -1,8 +1,12 @@
 import tensorflow as tf
+import logging
 from mnist import MNIST
+import datetime
 from QLearning import QLearning
-from ImageOperators import ConcatOperator,ImageInput,Conv2DFactory,PoolingFactory,TransConv2DFactory,ActivationFactory,BinaryOpFactory,ReuseFactory,DenseFactory
+from ImageOperators import *#ConcatOperator,ImageInput,Conv2DFactory,PoolingFactory,TransConv2DFactory,ActivationFactory,BinaryOpFactory,ReuseFactory,DenseFactory,ConcatOperatorDense
 import numpy as np
+import os
+
 mndata = MNIST('./')
 mndata.gz = True
 images, labels = mndata.load_training()
@@ -12,12 +16,12 @@ labels= np.array(labels)
 print ("Input Shape",images.shape,labels.shape)
 
 ###### Experiment Attributes
-OperatorLimit=10
-BatchSize=5
+OperatorLimit=20
+BatchSize=64
 OperatorSupport=[]
 MNIST_IMAGE_WIDTH=28
 MNIST_IMAGE_HEIGHT=28
-TrainEpochs=10
+TrainEpochs=100000
 
 ######
 
@@ -26,19 +30,24 @@ Op_List=[]
 
 #Convolution
 Op_List.append(Conv2DFactory(Size=2,ChannelCoef=2,Stride=1))
-Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=1))
-Op_List.append(Conv2DFactory(Size=2,ChannelCoef=2,Stride=2))
-Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=2))
+#Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=1))
+Op_List.append(Conv2DFactory(Size=2,ChannelCoef=1,Stride=2))
+#Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=2))
 
 #Trans Convolution
 Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=1,ImageCoef=2))
 Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=1,ImageCoef=2))
-Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=2,ImageCoef=2))
-Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=2,ImageCoef=2))
+#Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=2,ImageCoef=2))
+#Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=2,ImageCoef=2))
 
 #Dense
-Op_List.append(DenseFactory(HiddenNumCoef=1.5))
-Op_List.append(DenseFactory(HiddenNumCoef=0.5))
+Op_List.append(DenseFactory(HiddenNumCoef=2))
+Op_List.append(DenseFactory(HiddenNumCoef=1))
+#Op_List.append(DenseFactory(HiddenNumCoef=0.5))
+Op_List.append(DenseFactory(HiddenNumCoef=0.1))
+
+#Reuse
+Op_List.append(ReuseFactory(OutputNum=2))
 
 #Binary_Op
 Op_List.append(BinaryOpFactory(Type='Concat'))
@@ -54,21 +63,26 @@ Op_List.append(ActivationFactory(Type='Relu'))
 def TaskOutput(OutputList):
     Output=OutputList[0]
     OutTensor=Output.GetTensor()
-    OutTensorShape=OutTensor.shape().get_list()
+    OutTensorShape=OutTensor.shape().as_list()
     
     Reshape=OutTensor.reshape([BatchSize,-1])
     Output=tf.layer.dense(inputs=Reshape,units=10,activation=tf.softmax)
     return Output
 
 def NetworkDecor(Input,Labels):
-    Reshape=tf.reshape(Input,shape=[BatchSize,-1])
+    Reshape=tf.reshape(Input,shape=[BatchSize,get_size_except_dim(Input)])
+    print(Reshape.shape.as_list())
     Output=tf.layers.dense(inputs=Reshape,units=10,activation=tf.nn.softmax)
+    Labels=tf.cast(tf.reshape(Labels,shape=[BatchSize]),tf.int64)
     OneHotLabels=tf.one_hot(Labels,depth=10,axis=-1)
     Loss=tf.losses.softmax_cross_entropy(onehot_labels=OneHotLabels,logits=Output)
-    #Loss=tf.reshape(Loss,shape=[-1,1])
-    return Output,Loss
+    Acc=tf.reduce_mean(tf.cast(tf.equal(Labels, tf.argmax(Output,1)),tf.float32))
     
-RL_Exp=QLearning()
+    #Loss=tf.reshape(Loss,shape=[-1,1])
+    return Output,Loss,Acc
+
+with tf.device('/gpu:1'):     
+    RL_Exp=QLearning()
 TaskSpec={  "LogHistory":True,
             "OperatorList":Op_List,
             "NetworkGenerator":TaskOutput,
@@ -80,11 +94,19 @@ TaskSpec={  "LogHistory":True,
             "Epochs":TrainEpochs,
             "NetworkDecor":NetworkDecor,
             "BatchSize":BatchSize,
-            "ConcatOperator":ConcatOperator,
+            "ConcatOperator":ConcatOperatorDense,
             "InputOperator":ImageInput,
-            "TrajectoryLength":OperatorLimit-4
+            "TrajectoryLength":OperatorLimit-4,
+            "RewardGamma":0.9
             }
 
+logging.getLogger().setLevel(logging.DEBUG)
+now = datetime.datetime.now()
+logging.basicConfig(level=logging.INFO,
+                format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+                datefmt='%a, %d %b %Y %H:%M:%S',
+                filename='%s_%s.log'%("MNISTTask",now.strftime("%Y-%m-%d %H-%M")),
+                filemode='w')
                 
                 
 RL_Exp.StartTrial(TaskSpec)
