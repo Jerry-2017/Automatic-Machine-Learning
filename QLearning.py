@@ -8,25 +8,35 @@ Data_Format='NHWC'
 
 
 class EarlyStop():
-    def __init__(self,GlideWindow=1000):
+    def __init__(self,GlideWindow=200,FailMax=100):
         self.GlideWindow=GlideWindow
+        self.FailMax=FailMax
         self.Reset()
     def Reset(self):
         self.Loss=[]
         self.TrajCount=0
+        self.FailCnt=0
     def AddLoss(self,Loss):
         self.TrajCount+=1
         self.Loss.append(Loss)
     def ShouldStop(self):
         _Begin=max(0,self.TrajCount-self.GlideWindow)
         _Stop=self.TrajCount
-        _Flag=False
-        if self.TrajCount>500:
-            for i in range(_Begin ,_Stop):
-                if self.Loss[i]>self.Loss[-1]:
-                    _Flag=True
-                    break
-        return _Flag
+        _Good=True
+        if self.Loss[-1]<1e-5:
+            return True
+        for i in range(_Begin ,_Stop):
+            if self.Loss[i]<self.Loss[-1]:
+                _Good=False
+                break
+        if not _Good:
+            self.FailCnt+=1
+        else:
+            self.FailCnt=0
+        if self.FailCnt>self.FailMax:
+            return True
+        else:
+            return False
         
         
         
@@ -35,6 +45,7 @@ class QLearning():
     def __init__(self):
         self.QGraph=tf.Graph()
         self.QNetsess=tf.Session(graph=self.QGraph)
+        self.Optimizer = tf.train.AdamOptimizer(1e-4)
         self.TaskDataInit=False
         pass
         
@@ -102,7 +113,6 @@ class QLearning():
             
             self.QNetLoss = tf.losses.mean_squared_error(labels=NextLabel, predictions=self.QNetOutput)
             
-            self.Optimizer = tf.train.AdagradOptimizer(learning_rate=0.001)
             self.QNetTrain_op = self.Optimizer.minimize(
                     loss=self.QNetLoss)
                 #,global_step=tf.train.get_global_step())           
@@ -123,7 +133,7 @@ class QLearning():
         self.TaskSess.run( self.TaskDataIter.initializer)#,feed_dict={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:self.TaskNextLabel})
         if CheckNodeShape:
             self.Op_Shape=Graph.GetGraphNodeShape()
-       
+
         self.TaskTrain = self.Optimizer.minimize(
                 loss=self.TaskLoss,
                 global_step=tf.train.get_global_step())        ## Need to Change
@@ -140,6 +150,48 @@ class QLearning():
             self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()     
             self.TaskDataInit=True    
         print("TaskDataIter shape",self.TaskNextData.shape)
+
+    def DebugTrainNet(self,TaskSpec,OptionList):
+        LogHistory=TaskSpec["LogHistory"]
+        OperatorList=TaskSpec["OperatorList"]
+        NetworkDecor=TaskSpec["NetworkDecor"]
+        VertexNum=TaskSpec["OperatorNum"]
+        InputNum=TaskSpec["InputNum"]
+        OutputNum=TaskSpec["OutputNum"]
+        BatchSize=TaskSpec["BatchSize"]
+        Epochs=TaskSpec["Epochs"]
+        ConcatOperator=TaskSpec["ConcatOperator"]
+        InputOperator=TaskSpec["InputOperator"]
+        TrajectoryLength=TaskSpec["TrajectoryLength"]
+        RewardGamma=TaskSpec["RewardGamma"]
+        
+        TaskInput=TaskSpec["TaskInput"]
+        TaskLabel=TaskSpec["TaskLabel"]
+        
+        SetBatchSize(BatchSize)
+        
+        self.TaskGraph=tf.Graph()
+        self.TaskSess=tf.Session(graph=self.TaskGraph)
+        
+        Gph=Graph(  VertexNum=VertexNum,
+                    OperatorList=OperatorList,
+                    InputNum=InputNum,
+                    OutputNum=OutputNum,
+                    ConcatOperator=ConcatOperator,
+                    InputOperator=InputOperator
+                    )
+        with self.TaskGraph.as_default():
+            self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)     
+            for Option in OptionList:
+                Gph.ApplyOption(Option)
+            self.BuildTaskGraph(Graph=Gph,OutputDecor=NetworkDecor,ID=0)
+            for i in Gph.InternalTensor:
+                if i is None:
+                    continue
+                print(i,type(i).Name,i.GetTensor().shape)
+            #return    
+            Loss,Acc=self.TrainTaskNet(Step=Epochs)
+        print(Loss,Acc)
         
     def StartTrial(self,TaskSpec):
         LogHistory=TaskSpec["LogHistory"]
@@ -174,10 +226,11 @@ class QLearning():
             
         QNet_Format="3D_NoNull"
         for i in range(Epochs):
-            self.TaskGraph=tf.Graph()
-            self.TaskSess=tf.Session(graph=self.TaskGraph)
-            with self.TaskGraph.as_default():
-                self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)
+            if Epochs % 100==0:
+                self.TaskGraph=tf.Graph()
+                self.TaskSess=tf.Session(graph=self.TaskGraph)
+                with self.TaskGraph.as_default():
+                    self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)
                 
             Gph=Graph(  VertexNum=VertexNum,
                         OperatorList=OperatorList,
@@ -198,31 +251,37 @@ class QLearning():
                 for Option in OptionList:
                     if Gph.CheckOption(Option):
                         ValidOptionList.append(Option)
-                QNetInputList=[]
-                for Option in ValidOptionList:   
-                    Gph.ApplyOption(Option)
-                    QNetInput=Gph.UnifiedTransform(QNet_Format)
-                    QNetInputList.append(QNetInput)
-                    Gph.RevokeOption(Option)
+                
+                
+                if ChooseType=='QLearning':        
+                    QNetInputList=[]
+                    for Option in ValidOptionList:   
+                        Gph.ApplyOption(Option)
+                        QNetInput=Gph.UnifiedTransform(QNet_Format)
+                        QNetInputList.append(QNetInput)
+                        Gph.RevokeOption(Option)
+                        
+                    QNetInput=np.array(QNetInputList)
                     
-                QNetInput=np.array(QNetInputList)
+                    print("QNetInput.shape",QNetInput.shape)
+                    self.QNetsess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
+                    QValuesAll=None
+                    for _ in range((len(QNetInput)-1)//BatchSize+1):                
+                        QValuesPart=self.QNetsess.run(self.QNetOutput)
+                        if QValuesAll is None:
+                            QValuesAll=QValuesPart
+                        else:
+                            QValuesAll=np.concatenate((QValuesAll,QValuesPart),axis=0)
+                    QValuesClip=QValuesAll[:len(ValidOptionList)]
+                    
+                    print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
+                    PossQValues=np.exp(QValuesClip)
+                    _Sum=np.sum(PossQValues)
+                    ExpDist=PossQValues/_Sum
+                    ChosenOption=self.MakeChoice(Distribution=ExpDist,ChoiceList=ValidOptionList)
+                elif ChoosenType=='Random':
+                    ChosenOption=OptionList[random.randint(0,len(range(OptionList)))]
                 
-                print("QNetInput.shape",QNetInput.shape)
-                self.QNetsess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
-                QValuesAll=None
-                for _ in range((len(QNetInput)-1)//BatchSize+1):                
-                    QValuesPart=self.QNetsess.run(self.QNetOutput)
-                    if QValuesAll is None:
-                        QValuesAll=QValuesPart
-                    else:
-                        QValuesAll=np.concatenate((QValuesAll,QValuesPart),axis=0)
-                QValuesClip=QValuesAll[:len(ValidOptionList)]
-                
-                print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
-                PossQValues=np.exp(QValuesClip)
-                _Sum=np.sum(PossQValues)
-                ExpDist=PossQValues/_Sum
-                ChosenOption=self.MakeChoice(Distribution=ExpDist,ChoiceList=ValidOptionList)
                 self.Log("ChosenOption "+str(ChosenOption))
                 Gph.ApplyOption(ChosenOption)
                 
@@ -231,7 +290,7 @@ class QLearning():
                 
                 with self.TaskGraph.as_default():
                     self.BuildTaskGraph(Graph=Gph,OutputDecor=NetworkDecor,ID=i)
-                Loss,Acc=self.TrainTaskNet()
+                Loss,Acc=self.TrainTaskNet(Step=Epochs)
                 
                 HisItem={"Traj":j,"OptionList":Gph.ConnectOptions(),"TrainStep":Step,"Loss":Loss,"Acc":Acc,"UnifiedNet":Gph.UnifiedTransform(QNet_Format)}
                 if LogHistory==True:
@@ -245,7 +304,7 @@ class QLearning():
                 print("HisNet",HisPerfTemp[i])
                 HisPerfTemp[TrajectoryStep-i-2][0]+= RewardGamma*HisPerfTemp[TrajectoryStep-i-1][0]
             self.HisNetPerf.extend(HisPerfTemp)
-            QStep=10000
+            QStep=Epochs
             self.TrainQNet(self.QNetOutput,self.HisNet,self.HisNetPerf,QStep)
     
     def MakeChoice(self,Distribution,ChoiceList=None):
@@ -312,7 +371,7 @@ class QLearning():
             
             if i%100==0:
                 self.Log("Task Net Loss %f"%loss)            
-            #print(acc)
+                print(loss)
             if EarlyStopFlag:
                 es.AddLoss(loss)
                 if es.ShouldStop():
@@ -321,7 +380,6 @@ class QLearning():
         acc=[]
         for i in range(EvalEpoch):
            Acc=sess.run(self.TaskAcc)
-           print(Acc)
            acc.append(Acc)
         acc=np.sum(acc)/EvalEpoch
         self.Log("Task Net Acc %f"%acc)

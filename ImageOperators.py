@@ -7,6 +7,7 @@ OUTPUT_CHANNEL_MAX=128
 OUTPUT_IMAGE_WIDTH_MAX=60
 OUTPUT_IMAGE_HEIGHT_MAX=60
 MAX_DENSE_CONNECTION=500
+PADDING_TYPE="SAME"
 
 def get_size_except_dim(Tensor,dim=0):
     TensorShape=Tensor.get_shape().as_list()
@@ -17,6 +18,16 @@ def get_size_except_dim(Tensor,dim=0):
             size*=i
         _dim+=1
     return size    
+
+def get_size_except_dims(Tensor,dim=[0]):
+    TensorShape=Tensor.get_shape().as_list()
+    _dim=0
+    size=1
+    for i in TensorShape:
+        if _dim not in dim:
+            size*=i
+        _dim+=1
+    return size        
     
 def SetBatchSize(Batch_Size):
     global BatchSize
@@ -128,12 +139,14 @@ def Conv2DFactory(Size,ChannelCoef,Stride):
             print(Conv2D._ChannelCoef)
             OutputChannelNum=int(Shape[3]*Conv2D._ChannelCoef)
             assert(OutputChannelNum>=1)
-            Filter=tf.get_variable(name="conv_filter",shape=[Conv2D._Height,Conv2D._Width,Shape[3],OutputChannelNum],dtype=tf.float32)
-            self.Tensor=tf.nn.conv2d(   input=InputTensor,
-                                        filter=Filter,
-                                        strides=[1,Conv2D._Stride,Conv2D._Stride,1],
-                                        padding='SAME',
-                                        data_format=Data_Format)
+            init=tf.initializers.random_normal()
+            self.Tensor=tf.layers.conv2d(  inputs=InputTensor,
+                                        kernel_size=(Conv2D._Height,Conv2D._Width),
+                                        filters=OutputChannelNum,
+                                        strides=(Conv2D._Stride,Conv2D._Stride),
+                                        padding=PADDING_TYPE,
+                                        data_format="channels_last",
+                                        name="conv2d")
             OutputShape=self.Tensor.get_shape().as_list()
             self.SetImageAttr(*OutputShape[1:])
             
@@ -168,13 +181,13 @@ def PoolingFactory(Size,Stride,Type):
                 self.Tensor=tf.layers.max_pooling2d( inputs=InputTensor,
                                                 pool_size=(Pooling._Size,Pooling._Size),
                                                 strides=(Pooling._Stride,Pooling._Stride),
-                                                padding='SAME',
+                                                padding=PADDING_TYPE,
                                                 data_format='channels_last')
             elif Pooling._Type=='Avg':
                 self.Tensor=tf.layers.average_pooling2d( inputs=InputTensor,
                                                 pool_size=(Pooling._Size,Pooling._Size),
                                                 strides=(Pooling._Stride,Pooling._Stride),
-                                                padding='SAME',
+                                                padding=PADDING_TYPE,
                                                 data_format='channels_last')
 
         
@@ -210,8 +223,9 @@ def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
                                                 filters=OutputChannelNum,
                                                 kernel_size=(TransConv2D._Height,TransConv2D._Width),
                                                 strides=[TransConv2D._Stride,TransConv2D._Stride],
-                                                padding='SAME',
-                                                data_format="channels_last")
+                                                padding=PADDING_TYPE,
+                                                data_format="channels_last",
+                                                name="trans")
             OutputShape=self.Tensor.get_shape().as_list()
             self.SetImageAttr(*OutputShape[1:])
             
@@ -318,14 +332,14 @@ def DenseFactory(HiddenNumCoef):
         def ConstructFunc(self,InputList):
             Input=InputList[0]
             InputTensor=Input.GetTensor()
-            #BatchSize=InputTensor.get_shape().as_list()[0]
-            InputTensor=tf.reshape(InputTensor,[BatchSize,get_size_except_dim(InputTensor)])
-            Height,Width,Channel=Input.GetImageAttr()
+            #BatchSize=InputTensor.get_shape().as_list()[0]            
+            Height,Width,Channel=InputTensor.shape.as_list()[1:]
+            InputTensor=tf.reshape(InputTensor,[BatchSize,get_size_except_dims(InputTensor,dim=[0])])
             Height=int(HiddenNumCoef*Height)
             Width=int(HiddenNumCoef*Width)
             
             self.SetImageAttr(Height,Width,Channel)            
-            self.Tensor=tf.layers.dense(inputs=InputTensor,units=Height*Width*Channel,activation=tf.nn.relu)
+            self.Tensor=tf.layers.dense(inputs=InputTensor,units=Height*Width*Channel,activation=None,name="dense")
             self.Tensor=self.RestoreShape(self.Tensor)            
         def CheckValid(self,InputList):
             Input=InputList[0]
