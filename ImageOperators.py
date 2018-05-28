@@ -193,7 +193,7 @@ def PoolingFactory(Size,Stride,Type):
         
     return Pooling
     
-def TransConv2DFactory(Size,ImageCoef,ChannelCoef,Stride):
+def TransConv2DFactory(Size,ChannelCoef,Stride):
     class TransConv2D(ImageOperator):
 
         _Stride=Stride

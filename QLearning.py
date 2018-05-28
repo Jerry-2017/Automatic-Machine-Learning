@@ -3,6 +3,7 @@ import logging
 
 from ImageOperators import *
 import numpy as np
+import random
 from Graph import Graph,Operator
 Data_Format='NHWC'
 
@@ -49,7 +50,7 @@ class QLearning():
         self.TaskDataInit=False
         pass
         
-    def ConstructQFunc3D(self,ImageSize=5,BitDepth=7,BatchSize=5):
+    def ConstructQFunc3D(self,ImageSize=5,BitDepth=7,BatchSize=5,OneHotEmbed=None,EmbedLen=3):
         #print("BITDEPTH",BitDepth)
         with tf.variable_scope("QNet") as scope:
             self.QNetData = tf.placeholder(tf.float32 , shape=[None,BitDepth,ImageSize,ImageSize,1],name="QNet_input")
@@ -60,13 +61,26 @@ class QLearning():
             self.DataIter = Dataset.make_initializable_iterator()      
             NextData,NextLabel = self.DataIter.get_next()    
             
+            
+            #Embedding Layer1
+            
+            _shape=NextData.shape.as_list()
+            
+            reshape=tf.reshape(NextData,shape=[-1,BitDepth,ImageSize,ImageSize])
+            reshape=tf.reshape(tf.transpose(reshape,perm=[0,2,3,1]),shape=[-1,BitDepth])
+            Embed=tf.layers.dense(inputs=reshape,units=EmbedLen)
+            
+            reshape=tf.transpose(tf.reshape(Embed,shape=[-1,*_shape[2:4],EmbedLen]),perm=[0,3,1,2])
+            reshape=tf.reshape(reshape,shape=[-1,EmbedLen,ImageSize,ImageSize,1])
+            
+            
             #Conv3D_Layer1_Kernel=tf.Variable(tf.initializers.random_normal(shape=[BitDepth,2,2,1,3]),name="Conv3D_Layer1_Kernel",dtype=tf.float32,)
             #[filter_depth, filter_height, filter_width, in_channels, out_channels]
-            Conv3D_Layer1=tf.layers.conv3d( inputs=NextData,
-                                        filters=3,
-                                        kernel_size=(BitDepth,2,2),
-                                        strides=[BitDepth,1,1],
-                                        padding="SAME")
+            Conv3D_Layer1=tf.layers.conv3d( inputs=reshape,
+                                        filters=8,
+                                        kernel_size=(EmbedLen,5,5),
+                                        strides=[1,1,1],
+                                        padding="VALID")
             print("Conv3D Layer1 shape",Conv3D_Layer1.shape)
             _shape=Conv3D_Layer1.shape
             _shape=[-1,*_shape[2:]]
@@ -79,8 +93,8 @@ class QLearning():
                                             
             #Conv2D_Layer2_Kernel=tf.Variable("Conv2D_Layer2_Kernel",shape=[2,2,3,6],dtype=tf.float32,initializer=tf.initializers.random_normal)
             Conv2D_Layer2=tf.layers.conv2d(inputs=Pooling2D_Layer1,
-                                            filters=6,
-                                            kernel_size=[2,2],
+                                            filters=8,
+                                            kernel_size=[5,5],
                                             strides=[1,1],
                                             padding="SAME")
             
@@ -91,7 +105,7 @@ class QLearning():
 
             #Conv2D_Layer3_Kernel=tf.Variable("Conv2D_Layer3_Kernel",shape=[2,2,6,12],dtype=tf.float32,initializer=tf.initializers.random_normal)
             Conv2D_Layer3=tf.layers.conv2d(inputs=Pooling2D_Layer2,
-                                            kernel_size=[2,2],
+                                            kernel_size=[5,5],
                                             filters=12,
                                             strides=[1,1],
                                             padding="SAME")
@@ -223,7 +237,9 @@ class QLearning():
             QNetVar=tf.global_variables()#[op for op in tf.GraphKeys.GLOBAL_VARIABLES if isinstance(op,tf.Variable) and  not tf.is_variable_initialized(op)]
             #print([i.name for i in QNetVar])
             self.QNetsess.run(tf.initialize_variables(QNetVar) )#tf.global_variables_initializer())
-            
+        
+        Initial_Explore_Rate=0.5
+        Explore_Rate_Decay=0.001
         QNet_Format="3D_NoNull"
         for i in range(Epochs):
             if Epochs % 100==0:
@@ -240,7 +256,8 @@ class QLearning():
                         InputOperator=InputOperator
                         )
             Gph.InitializeCheckOptionInput([self.TaskNextData])
-            
+            if Initial_Explore_Rate>0:
+                Initial_Explore_Rate-=Explore_Rate_Decay
             TrajectoryStep=0
             HisNetTemp=[]
             HisPerfTemp=[]
@@ -252,6 +269,13 @@ class QLearning():
                     if Gph.CheckOption(Option):
                         ValidOptionList.append(Option)
                 
+                RandDie=random.random()
+                
+                if RandDie>Initial_Explore_Rate:
+                    ChooseType="QLearning"
+                else:
+                    ChooseType="Random"
+                    
                 
                 if ChooseType=='QLearning':        
                     QNetInputList=[]
@@ -279,8 +303,8 @@ class QLearning():
                     _Sum=np.sum(PossQValues)
                     ExpDist=PossQValues/_Sum
                     ChosenOption=self.MakeChoice(Distribution=ExpDist,ChoiceList=ValidOptionList)
-                elif ChoosenType=='Random':
-                    ChosenOption=OptionList[random.randint(0,len(range(OptionList)))]
+                elif ChooseType=='Random':
+                    ChosenOption=ValidOptionList[random.randint(0,len(ValidOptionList)-1)]
                 
                 self.Log("ChosenOption "+str(ChosenOption))
                 Gph.ApplyOption(ChosenOption)

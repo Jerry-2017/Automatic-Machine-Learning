@@ -36,8 +36,8 @@ Op_List.append(Conv2DFactory(Size=2,ChannelCoef=1,Stride=1))
 #Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=2))
 
 #Trans Convolution
-Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=1,ImageCoef=2))
-Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=1,ImageCoef=2))
+Op_List.append(TransConv2DFactory(Size=3,ChannelCoef=2,Stride=1))
+Op_List.append(TransConv2DFactory(Size=3,ChannelCoef=0.5,Stride=1))
 #Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=2,ImageCoef=2))
 #Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=2,ImageCoef=2))
 
@@ -74,7 +74,7 @@ def NetworkDecor(Input,Labels):
     #Loss=tf.reshape(Loss,shape=[-1,1])
     return Output,Loss,Acc
 
-Mode="TestUnifiedTrans"
+Mode="Train"
 
 RL_Exp=QLearning()
 TaskSpec={  "LogHistory":True,
