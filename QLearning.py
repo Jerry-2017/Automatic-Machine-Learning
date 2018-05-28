@@ -7,6 +7,65 @@ import random
 from Graph import Graph,Operator
 Data_Format='NHWC'
 
+def shuffle_union(a,b):
+    assert (a.shape[0]==b.shape[0])
+    dim=a.shape[0]
+    perm=np.random.permutation(dim)
+    ra=np.empty(a.shape,a.dtype)
+    rb=np.empty(b.shape,b.dtype)
+    for old,new in enumerate(perm):
+        ra[new]=a[old]
+        rb[new]=b[old]
+    return ra,rb
+        
+
+class DataIter:
+    def __init__(self,Data,Label,TestProp=0.1,BatchSize=64):
+        self.Data=Data
+        self.Label=Label
+        self.TestProp=TestProp
+        self.BatchSize=BatchSize
+        self.Reset()
+        
+    def Reset(self):
+        self.Data,self.Label=shuffle_union(self.Data,self.Label)
+        self.DataNum=self.Data.shape[0]
+        self.TestNum=int(self.DataNum*self.TestProp)
+        self.TrainNum=self.DataNum-self.TestNum
+        self.TestData=self.Data[self.TrainNum:]
+        self.TestLabel=self.Label[self.TrainNum:]
+        self.TrainData=self.Data[:self.TrainNum]
+        self.TrainLabel=self.Label[:self.TrainNum]
+        self.TestPivot=0
+        self.TrainPivot=0
+        
+    def Get(self,Arr,Start,Size):
+        Dim=Arr.shape[0]-1
+        RstArr=np.zeros([Size,*Arr.shape[1:]],Arr.dtype)
+        PivotRaw=Start
+        PivotRst=0
+        while Size>0:
+            Window=min(Dim-PivotRaw,Size)
+            RstArr[PivotRst:PivotRst+Window]=Arr[PivotRaw:PivotRaw+Window]
+            PivotRst+=Window
+            PivotRaw=(PivotRaw+Window)%Dim
+            Size-=Window
+        return RstArr,PivotRaw
+        
+    def NextBatch(self,Test=False):
+        if Test:
+            Data,_=self.Get(self.TestData,self.TestPivot,self.BatchSize)
+            Label,self.TestPivot=self.Get(self.TestLabel,self.TestPivot,self.BatchSize)
+        else:
+            Data,_=self.Get(self.TrainData,self.TrainPivot,self.BatchSize)
+            Label,self.TrainPivot=self.Get(self.TrainLabel,self.TrainPivot,self.BatchSize)
+            
+        return Data,Label
+    
+        
+        
+        
+
 
 class EarlyStop():
     def __init__(self,GlideWindow=200,FailMax=100):
@@ -48,6 +107,8 @@ class QLearning():
         self.QNetsess=tf.Session(graph=self.QGraph)
         self.Optimizer = tf.train.AdamOptimizer(1e-4)
         self.TaskDataInit=False
+        self.SessConfig = tf.ConfigProto()
+        self.SessConfig.gpu_options.allow_growth = True
         pass
         
     def ConstructQFunc3D(self,ImageSize=5,BitDepth=7,BatchSize=5,OneHotEmbed=None,EmbedLen=3):
@@ -144,7 +205,7 @@ class QLearning():
         Rst=Graph.StrOptionList()
         self.Log("Current Net Arc %s"%Rst)
         print("Temp_Output",Temp_Output.shape)
-        self.TaskSess.run( self.TaskDataIter.initializer)#,feed_dict={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:self.TaskNextLabel})
+        #self.TaskSess.run( self.TaskDataIter.initializer)#,feed_dict={self.TaskNetData:self.TaskNextData,self.TaskNetLabel:self.TaskNextLabel})
         if CheckNodeShape:
             self.Op_Shape=Graph.GetGraphNodeShape()
 
@@ -156,12 +217,17 @@ class QLearning():
     def InitializeTaskGraph(self,Data,Label,BatchSize):
         #print(Data.shape)
         with tf.variable_scope("TaskNet") as scope:
+            """
             self.TaskNetData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
             self.TaskNetLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
+
             DatasetRaw = tf.data.Dataset.from_tensor_slices((Data,Label))
             Dataset=DatasetRaw.repeat().batch(BatchSize)
             self.TaskDataIter = Dataset.make_initializable_iterator()      
-            self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()     
+            self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()"""
+            self.TaskDataIter=DataIter(Data,Label,TestProp=0.1,BatchSize=BatchSize)
+            self.TaskNextData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
+            self.TaskNextLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
             self.TaskDataInit=True    
         print("TaskDataIter shape",self.TaskNextData.shape)
 
@@ -185,7 +251,7 @@ class QLearning():
         SetBatchSize(BatchSize)
         
         self.TaskGraph=tf.Graph()
-        self.TaskSess=tf.Session(graph=self.TaskGraph)
+        self.TaskSess=tf.Session(graph=self.TaskGraph,config=self.SessConfig)
         
         Gph=Graph(  VertexNum=VertexNum,
                     OperatorList=OperatorList,
@@ -244,7 +310,7 @@ class QLearning():
         for i in range(Epochs):
             if Epochs % 100==0:
                 self.TaskGraph=tf.Graph()
-                self.TaskSess=tf.Session(graph=self.TaskGraph)
+                self.TaskSess=tf.Session(graph=self.TaskGraph,config=self.SessConfig)
                 with self.TaskGraph.as_default():
                     self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)
                 
@@ -261,6 +327,7 @@ class QLearning():
             TrajectoryStep=0
             HisNetTemp=[]
             HisPerfTemp=[]
+            self.InitializedVar=[]
             for j in range(TrajectoryLength):
                 OptionList=Gph.ConnectOptions()
                 ValidOptionList=[]
@@ -383,28 +450,37 @@ class QLearning():
         
         with self.TaskGraph.as_default():
             TaskVar=tf.global_variables()      
-            TaskVar+=tf.local_variables()      
-            sess.run(tf.initialize_variables(TaskVar) )#tf.global_variables_initializer()) 
+            TaskVar+=tf.local_variables() 
+            NewVar=[]
+            for Var in TaskVar:
+                if Var.name not in self.InitializedVar:
+                    self.InitializedVar.append(Var.name)
+                    NewVar.append(Var)
+            sess.run(tf.initialize_variables(NewVar) )#tf.global_variables_initializer()) 
         #print([i.name for i in TaskVar])
-        OpShape=sess.run(self.Op_Shape)
+        Data,Label=self.TaskDataIter.NextBatch()
+        OpShape=sess.run(self.Op_Shape,feed_dict={self.TaskNextData:Data,self.TaskNextLabel:Label})
         self.Log("Operator Shape %s"%(str(OpShape)))
-        es=EarlyStop()
+        es=EarlyStop(GlideWindow=20,FailMax=10)
         for i in range(Step):                
-            _,loss=sess.run([self.TaskTrain,self.TaskLoss])
-            
-            
-            if i%100==0:
-                self.Log("Task Net Loss %f"%loss)            
-                print(loss)
-            if EarlyStopFlag:
-                es.AddLoss(loss)
-                if es.ShouldStop():
-                    break
+            Data,Label=self.TaskDataIter.NextBatch()
+            _,loss=sess.run([self.TaskTrain,self.TaskLoss],feed_dict={self.TaskNextData:Data,self.TaskNextLabel:Label})
+            if i%10==0:
+                Data,Label=self.TaskDataIter.NextBatch(Test=True)
+                acc=sess.run(self.TaskAcc,feed_dict={self.TaskNextData:Data,self.TaskNextLabel:Label})                
+                if EarlyStopFlag:
+                    es.AddLoss(1-acc)
+                if i%100==0:
+                    self.Log("Task Net Loss %f Acc %f"%(loss,acc))
+                    print(acc)
+                    if es.ShouldStop():
+                        break
         EvalEpoch=20
         acc=[]
         for i in range(EvalEpoch):
-           Acc=sess.run(self.TaskAcc)
-           acc.append(Acc)
+            Data,Label=self.TaskDataIter.NextBatch(Test=True)
+            Acc=sess.run(self.TaskAcc,feed_dict={self.TaskNextData:Data,self.TaskNextLabel:Label})
+            acc.append(Acc)
         acc=np.sum(acc)/EvalEpoch
         self.Log("Task Net Acc %f"%acc)
         return [loss],[acc]
