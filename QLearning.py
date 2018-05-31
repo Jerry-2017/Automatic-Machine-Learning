@@ -20,22 +20,29 @@ def shuffle_union(a,b):
         
 
 class DataIter:
-    def __init__(self,Data,Label,TestProp=0.1,BatchSize=64):
+    def __init__(self,Data,Label=None,TestProp=0.1,BatchSize=64,InOrder=False):
         self.Data=Data
         self.Label=Label
         self.TestProp=TestProp
         self.BatchSize=BatchSize
+        self.InOrder=InOrder
         self.Reset()
         
     def Reset(self):
-        self.Data,self.Label=shuffle_union(self.Data,self.Label)
+        if not self.InOrder:
+            if self.Label is not None:
+                self.Data,self.Label=shuffle_union(self.Data,self.Label)
+            else:
+                self.Data=np.shuffle(self.Data)
         self.DataNum=self.Data.shape[0]
         self.TestNum=int(self.DataNum*self.TestProp)
         self.TrainNum=self.DataNum-self.TestNum
-        self.TestData=self.Data[self.TrainNum:]
-        self.TestLabel=self.Label[self.TrainNum:]
+        self.TestData=self.Data[self.TrainNum:]        
         self.TrainData=self.Data[:self.TrainNum]
-        self.TrainLabel=self.Label[:self.TrainNum]
+        
+        if self.Label is not None:
+            self.TestLabel=self.Label[self.TrainNum:]
+            self.TrainLabel=self.Label[:self.TrainNum]
         self.TestPivot=0
         self.TrainPivot=0
         
@@ -53,15 +60,20 @@ class DataIter:
         return RstArr,PivotRaw
         
     def NextBatch(self,Test=False):
-        if Test:
-            Data,_=self.Get(self.TestData,self.TestPivot,self.BatchSize)
-            Label,self.TestPivot=self.Get(self.TestLabel,self.TestPivot,self.BatchSize)
+        if self.Label is not None:
+            if Test:
+                Data,_=self.Get(self.TestData,self.TestPivot,self.BatchSize)
+                Label,self.TestPivot=self.Get(self.TestLabel,self.TestPivot,self.BatchSize)
+            else:
+                Data,_=self.Get(self.TrainData,self.TrainPivot,self.BatchSize)
+                Label,self.TrainPivot=self.Get(self.TrainLabel,self.TrainPivot,self.BatchSize)
+            return Data,Label
         else:
-            Data,_=self.Get(self.TrainData,self.TrainPivot,self.BatchSize)
-            Label,self.TrainPivot=self.Get(self.TrainLabel,self.TrainPivot,self.BatchSize)
-            
-        return Data,Label
-    
+            if Test:
+                Data,self.TestPivot=self.Get(self.TestData,self.TestPivot,self.BatchSize)
+            else:
+                Data,self.TrainPivot=self.Get(self.TrainData,self.TrainPivot,self.BatchSize)
+            return Data
         
         
         
@@ -103,12 +115,13 @@ class EarlyStop():
 
 class QLearning():
     def __init__(self):
-        self.QGraph=tf.Graph()
-        self.QNetsess=tf.Session(graph=self.QGraph)
-        self.Optimizer = tf.train.AdamOptimizer(1e-4)
-        self.TaskDataInit=False
         self.SessConfig = tf.ConfigProto()
         self.SessConfig.gpu_options.allow_growth = True
+        self.QGraph=tf.Graph()
+        self.QNetsess=tf.Session(graph=self.QGraph,config=self.SessConfig)
+        self.Optimizer = tf.train.AdamOptimizer(1e-4)
+        self.TaskDataInit=False
+
         pass
         
     def ConstructQFunc3D(self,ImageSize=5,BitDepth=7,BatchSize=5,OneHotEmbed=None,EmbedLen=3):
@@ -117,11 +130,12 @@ class QLearning():
             self.QNetData = tf.placeholder(tf.float32 , shape=[None,BitDepth,ImageSize,ImageSize,1],name="QNet_input")
             self.QNetLabel = tf.placeholder(tf.float32, shape=[None,1], name="QNet_label" )
             
-            DatasetRaw = tf.data.Dataset.from_tensor_slices((self.QNetData,self.QNetLabel))
-            Dataset=DatasetRaw.repeat().batch(BatchSize)
-            self.DataIter = Dataset.make_initializable_iterator()      
-            NextData,NextLabel = self.DataIter.get_next()    
+            #DatasetRaw = tf.data.Dataset.from_tensor_slices((self.QNetData,self.QNetLabel))
+            #Dataset=DatasetRaw.repeat().batch(BatchSize)
+            #self.DataIter = Dataset.make_initializable_iterator()      
+            #NextData,NextLabel = self.DataIter.get_next()    
             
+            NextData,NextLabel=self.QNetData,self.QNetLabel
             
             #Embedding Layer1
             
@@ -214,7 +228,7 @@ class QLearning():
                 global_step=tf.train.get_global_step())        ## Need to Change
         
     
-    def InitializeTaskGraph(self,Data,Label,BatchSize):
+    def InitializeTaskGraph(self,Data,Label):
         #print(Data.shape)
         with tf.variable_scope("TaskNet") as scope:
             """
@@ -225,7 +239,7 @@ class QLearning():
             Dataset=DatasetRaw.repeat().batch(BatchSize)
             self.TaskDataIter = Dataset.make_initializable_iterator()      
             self.TaskNextData,self.TaskNextLabel = self.TaskDataIter.get_next()"""
-            self.TaskDataIter=DataIter(Data,Label,TestProp=0.1,BatchSize=BatchSize)
+            self.TaskDataIter=DataIter(Data,Label,TestProp=0.1,BatchSize=self.BatchSize)
             self.TaskNextData = tf.placeholder(tf.float32 , shape=[None,*Data.shape[1:]],name="TaskNet_input")
             self.TaskNextLabel = tf.placeholder(tf.float32, shape=[None,*Label.shape[1:]], name="TaskNet_label" )
             self.TaskDataInit=True    
@@ -261,7 +275,7 @@ class QLearning():
                     InputOperator=InputOperator
                     )
         with self.TaskGraph.as_default():
-            self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)     
+            self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel)     
             for Option in OptionList:
                 Gph.ApplyOption(Option)
             self.BuildTaskGraph(Graph=Gph,OutputDecor=NetworkDecor,ID=0)
@@ -294,8 +308,10 @@ class QLearning():
         
         self.Log("Operator List "+str(OperatorList))
         
+        
         #ImageOperators
         SetBatchSize(BatchSize)
+        self.BatchSize=BatchSize
         
         with self.QGraph.as_default():
             self.ConstructQFunc3D(ImageSize=VertexNum,BitDepth=len(OperatorList),BatchSize=BatchSize)
@@ -312,7 +328,7 @@ class QLearning():
                 self.TaskGraph=tf.Graph()
                 self.TaskSess=tf.Session(graph=self.TaskGraph,config=self.SessConfig)
                 with self.TaskGraph.as_default():
-                    self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel,BatchSize=BatchSize)
+                    self.InitializeTaskGraph(Data=TaskInput,Label=TaskLabel)
                 
             Gph=Graph(  VertexNum=VertexNum,
                         OperatorList=OperatorList,
@@ -354,18 +370,8 @@ class QLearning():
                         
                     QNetInput=np.array(QNetInputList)
                     
-                    print("QNetInput.shape",QNetInput.shape)
-                    self.QNetsess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
-                    QValuesAll=None
-                    for _ in range((len(QNetInput)-1)//BatchSize+1):                
-                        QValuesPart=self.QNetsess.run(self.QNetOutput)
-                        if QValuesAll is None:
-                            QValuesAll=QValuesPart
-                        else:
-                            QValuesAll=np.concatenate((QValuesAll,QValuesPart),axis=0)
-                    QValuesClip=QValuesAll[:len(ValidOptionList)]
-                    
-                    print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
+                    QValuesClip=self.PredictQNet(QNetInput)
+
                     PossQValues=np.exp(QValuesClip)
                     _Sum=np.sum(PossQValues)
                     ExpDist=PossQValues/_Sum
@@ -417,29 +423,47 @@ class QLearning():
     def Log(self,Log):
         logging.info(Log)
         #print(Log)
-    
-    def TrainQNet(self,Output,Data,Label,Step,EarlyStopFlag=True):
-    
+        
+    def PredictQNet(self,QNetInput):
+        print("QNetInput.shape",QNetInput.shape)
+        #self.QNetsess.run(self.DataIter.initializer,feed_dict={self.QNetData:QNetInput,self.QNetLabel:np.zeros([QNetInput.shape[0],1])})
+        dataiter=DataIter(QNetInput,BatchSize=self.BatchSize,TestProp=0,InOrder=True)
+        QValuesAll=None
+        for _ in range((len(QNetInput)-1)//self.BatchSize+1):
+            Data=dataiter.NextBatch()
+            QValuesPart=self.QNetsess.run(self.QNetOutput,feed_dict={self.QNetData:Data})
+            if QValuesAll is None:
+                QValuesAll=QValuesPart
+            else:
+                QValuesAll=np.concatenate((QValuesAll,QValuesPart),axis=0)
+        QValuesClip=QValuesAll[:QNetInput.shape[0]]
+        
+        print("All shape",QValuesAll.shape,"Clip ",QValuesClip.shape)
+        return QValuesClip
+        
+    def TrainQNet(self,Output,Data,Label,Step,EarlyStopFlag=True):        
         sess=self.QNetsess
         Data=np.array(Data)
         Label=np.array(Label)
-        es=EarlyStop()
+        self.QNetDataIter=DataIter(Data,Label)
+        es=EarlyStop(GlideWindow=20,FailMax=10)
         print("DATA",Data.shape,"LABEL",Label.shape)
         
         for i in range(Step):                
-            if i==0:
-                feed_dict={self.QNetData:Data,self.QNetLabel:Label}
-            else:
-                feed_dict={}
-            _,acc=sess.run([self.QNetTrain_op,self.QNetLoss],feed_dict=feed_dict)
+            Data,Label=self.QNetDataIter.NextBatch()
+            _,acc=sess.run([self.QNetTrain_op,self.QNetLoss],feed_dict={self.QNetData:Data,self.QNetLabel:Label})
             
-            if i%100==0:            
-                self.Log("QLearning Net Loss %f"%acc)
+            if i%50==0:            
+                for i in range(20):
+                    Data,Label=self.QNetDataIter.NextBatch(Test=True)
+                    loss=sess.run(self.QNetLoss,feed_dict={self.QNetData:Data,self.QNetLabel:Label})
+                
+                self.Log("QLearning Net Loss %f"%loss)
             
-            if EarlyStopFlag:
-                es.AddLoss(acc)
-                if es.ShouldStop():
-                    break
+                if EarlyStopFlag:
+                    es.AddLoss(loss)
+                    if es.ShouldStop():
+                        break
             
             
                 
@@ -464,6 +488,7 @@ class QLearning():
         es=EarlyStop(GlideWindow=20,FailMax=10)
         for i in range(Step):                
             Data,Label=self.TaskDataIter.NextBatch()
+            #print(Data.shape,Label.shape)
             _,loss=sess.run([self.TaskTrain,self.TaskLoss],feed_dict={self.TaskNextData:Data,self.TaskNextLabel:Label})
             if i%10==0:
                 Data,Label=self.TaskDataIter.NextBatch(Test=True)
