@@ -91,6 +91,9 @@ class EarlyStop():
     def AddLoss(self,Loss):
         self.TrajCount+=1
         self.Loss.append(Loss)
+        if len(self.Loss)>self.GlideWindow*10:
+            self.Loss=self.Loss[-self.GlideWindow:]
+            self.TrajCount=self.GlideWindow
     def ShouldStop(self):
         _Begin=max(0,self.TrajCount-self.GlideWindow)
         _Stop=self.TrajCount
@@ -193,7 +196,7 @@ class QLearning():
                                             
             Reshape_Layer3=tf.reshape(Pooling2D_Layer3,shape=[-1,_shape[1]*_shape[2]*_shape[3]])
             #print(Reshape_Layer3.shape)
-            Dense_Layer4=tf.layers.dense(inputs=Reshape_Layer3, units=256, activation=tf.nn.relu)
+            Dense_Layer4=tf.layers.dense(inputs=Reshape_Layer3, units=1024, activation=tf.nn.relu)
             Dropout_Layer4=tf.layers.dropout(inputs=Dense_Layer4,rate=0.5)
             
             Output_Layer=tf.layers.dense(inputs=Reshape_Layer3, units=1, activation=tf.nn.sigmoid)

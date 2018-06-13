@@ -22,7 +22,7 @@ BatchSize=64
 OperatorSupport=[]
 MNIST_IMAGE_WIDTH=28
 MNIST_IMAGE_HEIGHT=28
-TrainEpochs=1000
+TrainEpochs=10000
 
 ######
 
@@ -30,14 +30,15 @@ TrainEpochs=1000
 Op_List=[]
 
 #Convolution
-Op_List.append(Conv2DFactory(Size=4,ChannelCoef=4,Stride=1))
+Op_List.append(Conv2DFactory(Size=4,ChannelCoef=2,Stride=1))
+Op_List.append(Conv2DFactory(Size=3,ChannelCoef=1,Stride=2))
 #Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=1))
 Op_List.append(Conv2DFactory(Size=2,ChannelCoef=1,Stride=1))
 #Op_List.append(Conv2DFactory(Size=2,ChannelCoef=0.5,Stride=2))
 
 #Trans Convolution
-Op_List.append(TransConv2DFactory(Size=3,ChannelCoef=2,Stride=1))
-Op_List.append(TransConv2DFactory(Size=3,ChannelCoef=0.5,Stride=1))
+#Op_List.append(TransConv2DFactory(Size=3,ChannelCoef=2,Stride=1))
+#Op_List.append(TransConv2DFactory(Size=3,ChannelCoef=0.5,Stride=1))
 #Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=2,Stride=2,ImageCoef=2))
 #Op_List.append(TransConv2DFactory(Size=2,ChannelCoef=0.5,Stride=2,ImageCoef=2))
 
@@ -59,6 +60,7 @@ Op_List.append(PoolingFactory(Size=2,Stride=2,Type='Avg'))
 
 #Activation
 Op_List.append(ActivationFactory(Type='Relu'))
+Op_List.append(ActivationFactory(Type='Tanh'))
 
 
 def NetworkDecor(Input,Labels):

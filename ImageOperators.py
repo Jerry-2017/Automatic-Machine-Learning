@@ -3,10 +3,10 @@ from Graph import Operator
 
 Data_Format='NHWC'
 
-OUTPUT_CHANNEL_MAX=128
-OUTPUT_IMAGE_WIDTH_MAX=60
-OUTPUT_IMAGE_HEIGHT_MAX=60
-MAX_DENSE_CONNECTION=500
+OUTPUT_CHANNEL_MAX=16
+OUTPUT_IMAGE_WIDTH_MAX=30
+OUTPUT_IMAGE_HEIGHT_MAX=30
+MAX_DENSE_CONNECTION=64
 PADDING_TYPE="SAME"
 
 def get_size_except_dim(Tensor,dim=0):
@@ -259,7 +259,9 @@ def ActivationFactory(Type):
             elif  Activation._Type=='Leaky_Relu':
                 self.Tensor=tf.nn.leaky_relu(features=InputTensor)
             elif  Activation._Type=='L2_Norm':
-                self.Tensor=tf.nn.l2_normalize(features=InputTensor)      
+                self.Tensor=tf.nn.l2_normalize(features=InputTensor)    
+            elif Activation._Type=='Tanh':
+                self.Tensor=tf.tanh(x=InputTensor) 
     return Activation
 
 def BinaryOpFactory(Type):
